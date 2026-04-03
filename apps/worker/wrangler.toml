@@ -4,7 +4,7 @@ compatibility_date = "2024-12-01"
 workers_dev = true
 
 # ═══════════════════════════════════════════════════════════════
-# デフォルト = テスト環境 (noda@)
+# デフォルト = テスト環境
 # 使い方: npx wrangler deploy
 # ═══════════════════════════════════════════════════════════════
 account_id = "YOUR_DEV_ACCOUNT_ID"
@@ -26,7 +26,7 @@ bucket_name = "line-harness-images"
 crons = ["*/5 * * * *"]
 
 # ═══════════════════════════════════════════════════════════════
-# 本番環境 (aiagent.mini@)
+# 本番環境
 # 使い方: npx wrangler deploy --env production --name your-worker-name
 # D1:     npx wrangler d1 execute line-crm --env production --remote --file ...
 # ═══════════════════════════════════════════════════════════════
