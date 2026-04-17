@@ -27,8 +27,29 @@ function serialize(row: EntryRoute) {
 // GET /api/entry-routes
 entryRoutes.get('/api/entry-routes', async (c) => {
   try {
-    const items = await getEntryRoutes(c.env.DB);
-    return c.json({ success: true, data: items.map(serialize) });
+    const lineAccountId = c.req.query('lineAccountId');
+
+    // アカウントフィルター + 流入人数をJOINで取得
+    const query = lineAccountId
+      ? `SELECT er.*, COUNT(rt.id) as count
+         FROM entry_routes er
+         LEFT JOIN tags t ON er.tag_id = t.id
+         LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
+         WHERE t.line_account_id = ?
+         GROUP BY er.id
+         ORDER BY er.created_at DESC`
+      : `SELECT er.*, COUNT(rt.id) as count
+         FROM entry_routes er
+         LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
+         GROUP BY er.id
+         ORDER BY er.created_at DESC`;
+
+    const result = lineAccountId
+      ? await c.env.DB.prepare(query).bind(lineAccountId).all<EntryRoute & { count: number }>()
+      : await c.env.DB.prepare(query).all<EntryRoute & { count: number }>();
+
+    const data = result.results.map(row => ({ ...serialize(row), count: row.count ?? 0 }));
+    return c.json({ success: true, data });
   } catch (err) {
     console.error('GET /api/entry-routes error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);

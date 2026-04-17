@@ -451,7 +451,7 @@ export const api = {
       ),
   },
   entryRoutes: {
-    list: () => fetchApi<{ success: boolean; data: { id: string; refCode: string; name: string; tagId: string | null; scenarioId: string | null; isActive: boolean; createdAt: string }[] }>('/api/entry-routes'),
+    list: (params?: { lineAccountId?: string }) => fetchApi<{ success: boolean; data: { id: string; refCode: string; name: string; tagId: string | null; scenarioId: string | null; isActive: boolean; createdAt: string; count: number }[] }>('/api/entry-routes' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')),
     create: (data: { refCode: string; name: string; tagId?: string | null }) =>
       fetchApi<{ success: boolean; data: unknown }>('/api/entry-routes', { method: 'POST', body: JSON.stringify(data) }),
     delete: (id: string) =>

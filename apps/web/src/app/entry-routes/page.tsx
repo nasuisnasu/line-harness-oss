@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
+import { useAccount } from '@/lib/account-context'
 
 interface EntryRoute {
   id: string
@@ -12,6 +13,7 @@ interface EntryRoute {
   scenarioId: string | null
   isActive: boolean
   createdAt: string
+  count: number
 }
 
 interface Tag { id: string; name: string; color: string }
@@ -24,14 +26,16 @@ export default function EntryRoutesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ refCode: '', name: '', tagId: '' })
   const [saving, setSaving] = useState(false)
+  const { selectedAccount } = useAccount()
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
+      const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
       const [routesRes, tagsRes] = await Promise.all([
-        api.entryRoutes.list(),
-        api.tags.list(),
+        api.entryRoutes.list(params),
+        api.tags.list(params),
       ])
       if (routesRes.success) setRoutes(routesRes.data)
       if (tagsRes.success) setTags(tagsRes.data)
@@ -40,7 +44,7 @@ export default function EntryRoutesPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedAccount])
 
   useEffect(() => { load() }, [load])
 
@@ -133,6 +137,10 @@ export default function EntryRoutesPage() {
                   <div className="text-xs text-gray-500 font-mono truncate">
                     {baseUrl}/liff/track?ref={r.refCode}
                   </div>
+                </div>
+                <div className="mx-4 text-right flex-shrink-0">
+                  <span className="text-2xl font-bold text-gray-900">{r.count}</span>
+                  <span className="text-xs text-gray-400 ml-1">人</span>
                 </div>
                 <button onClick={() => handleDelete(r.id, r.name)} className="ml-4 text-xs text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 flex-shrink-0">削除</button>
               </div>
