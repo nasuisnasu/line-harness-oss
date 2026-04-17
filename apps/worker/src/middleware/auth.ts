@@ -7,6 +7,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   const path = new URL(c.req.url).pathname;
   if (
     path === '/webhook' ||
+    path.startsWith('/webhook/') ||
     path === '/docs' ||
     path === '/openapi.json' ||
     path === '/api/affiliates/click' ||
