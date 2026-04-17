@@ -69,7 +69,8 @@ export default function EntryRoutesPage() {
     load()
   }
 
-  const baseUrl = 'https://line-crm-worker.readash-crm.workers.dev'
+  const liffId = '2009821004-brTkmVVK'
+  const baseUrl = `https://liff.line.me/${liffId}`
 
   return (
     <div>
@@ -135,7 +136,7 @@ export default function EntryRoutesPage() {
                     )}
                   </div>
                   <div className="text-xs text-gray-500 font-mono truncate">
-                    {baseUrl}/liff/track?ref={r.refCode}
+                    {baseUrl}?ref={r.refCode}
                   </div>
                 </div>
                 <div className="mx-4 text-right flex-shrink-0">
