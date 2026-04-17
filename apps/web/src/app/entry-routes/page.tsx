@@ -27,9 +27,10 @@ export default function EntryRoutesPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError('')
     try {
       const [routesRes, tagsRes] = await Promise.all([
-        fetch('/api/entry-routes', { headers: { Authorization: `Bearer ${localStorage.getItem('lh_api_key') || ''}` } }).then(r => r.json()),
+        api.entryRoutes.list(),
         api.tags.list(),
       ])
       if (routesRes.success) setRoutes(routesRes.data)
@@ -47,14 +48,7 @@ export default function EntryRoutesPage() {
     if (!form.refCode || !form.name) return
     setSaving(true)
     try {
-      const res = await fetch('/api/entry-routes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('lh_api_key') || ''}`,
-        },
-        body: JSON.stringify({ refCode: form.refCode, name: form.name, tagId: form.tagId || null }),
-      }).then(r => r.json())
+      const res = await api.entryRoutes.create({ refCode: form.refCode, name: form.name, tagId: form.tagId || null })
       if (res.success) {
         setShowCreate(false)
         setForm({ refCode: '', name: '', tagId: '' })
@@ -67,10 +61,7 @@ export default function EntryRoutesPage() {
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`「${name}」を削除しますか？`)) return
-    await fetch(`/api/entry-routes/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('lh_api_key') || ''}` },
-    })
+    await api.entryRoutes.delete(id)
     load()
   }
 

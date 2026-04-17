@@ -450,6 +450,13 @@ export const api = {
         '/api/notifications?' + new URLSearchParams(params as Record<string, string>),
       ),
   },
+  entryRoutes: {
+    list: () => fetchApi<{ success: boolean; data: { id: string; refCode: string; name: string; tagId: string | null; scenarioId: string | null; isActive: boolean; createdAt: string }[] }>('/api/entry-routes'),
+    create: (data: { refCode: string; name: string; tagId?: string | null }) =>
+      fetchApi<{ success: boolean; data: unknown }>('/api/entry-routes', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      fetchApi<{ success: boolean; data: null }>(`/api/entry-routes/${id}`, { method: 'DELETE' }),
+  },
   health: {
     accounts: () =>
       fetchApi<ApiResponse<LineAccount[]>>('/api/line-accounts'),
