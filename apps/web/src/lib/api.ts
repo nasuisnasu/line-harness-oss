@@ -60,6 +60,7 @@ export type FriendListParams = {
   offset?: string
   limit?: string
   tagId?: string
+  lineAccountId?: string
 }
 
 export type FriendWithTags = Friend & { tags: Tag[] }
@@ -72,8 +73,10 @@ export const api = {
       ),
     get: (id: string) =>
       fetchApi<ApiResponse<FriendWithTags>>(`/api/friends/${id}`),
-    count: () =>
-      fetchApi<ApiResponse<{ count: number }>>('/api/friends/count'),
+    count: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<{ count: number }>>(
+        '/api/friends/count' + (params ? '?' + new URLSearchParams(params as Record<string, string>) : '')
+      ),
     addTag: (friendId: string, tagId: string) =>
       fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/tags`, {
         method: 'POST',
@@ -85,19 +88,23 @@ export const api = {
       }),
   },
   tags: {
-    list: () =>
-      fetchApi<ApiResponse<Tag[]>>('/api/tags'),
-    create: (data: { name: string; color: string }) =>
-      fetchApi<ApiResponse<Tag>>('/api/tags', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<Tag[]>>(
+        '/api/tags' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')
+      ),
+    create: (data: { name: string; color: string }, params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<Tag>>(
+        '/api/tags' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+        { method: 'POST', body: JSON.stringify(data) }
+      ),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/tags/${id}`, { method: 'DELETE' }),
   },
   scenarios: {
-    list: () =>
-      fetchApi<ApiResponse<(Scenario & { stepCount?: number })[]>>('/api/scenarios'),
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<(Scenario & { stepCount?: number })[]>>(
+        '/api/scenarios' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')
+      ),
     get: (id: string) =>
       fetchApi<ApiResponse<Scenario & { steps: ScenarioStep[] }>>(`/api/scenarios/${id}`),
     create: (data: Omit<Scenario, 'id' | 'createdAt' | 'updatedAt'>) =>
@@ -132,8 +139,10 @@ export const api = {
       }),
   },
   broadcasts: {
-    list: () =>
-      fetchApi<ApiResponse<ApiBroadcast[]>>('/api/broadcasts'),
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<ApiBroadcast[]>>(
+        '/api/broadcasts' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')
+      ),
     get: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),
     create: (data: {
@@ -259,17 +268,17 @@ export const api = {
       ),
   },
   templates: {
-    list: (category?: string) =>
+    list: (category?: string, params?: { lineAccountId?: string }) =>
       fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }[]>>(
-        '/api/templates' + (category ? '?' + new URLSearchParams({ category }) : ''),
+        '/api/templates?' + new URLSearchParams({ ...(category ? { category } : {}), ...(params as Record<string, string> || {}) }),
       ),
     get: (id: string) =>
       fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }>>(
         `/api/templates/${id}`,
       ),
-    create: (data: { name: string; category: string; messageType: string; messageContent: string }) =>
+    create: (data: { name: string; category: string; messageType: string; messageContent: string }, params?: { lineAccountId?: string }) =>
       fetchApi<ApiResponse<{ id: string; name: string; category: string; messageType: string; messageContent: string; createdAt: string; updatedAt: string }>>(
-        '/api/templates',
+        '/api/templates?' + new URLSearchParams(params as Record<string, string> || {}),
         { method: 'POST', body: JSON.stringify(data) },
       ),
     update: (id: string, data: Partial<{ name: string; category: string; messageType: string; messageContent: string }>) =>
