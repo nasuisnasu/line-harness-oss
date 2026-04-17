@@ -7,16 +7,18 @@ import {
   getFriendByLineUserId,
   getLineAccountById,
   getScenarios,
+  getScenarioById,
   enrollFriendInScenario,
   getScenarioSteps,
   advanceFriendScenario,
   completeFriendScenario,
   upsertChatOnMessage,
   addTagToFriend,
+  getEntryRouteByRefCode,
   jstNow,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
-import { buildMessage } from '../services/step-delivery.js';
+import { buildMessage, applyVars } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
 const webhook = new Hono<Env>();
@@ -132,57 +134,74 @@ async function handleEvent(
     });
 
     // friend_add シナリオに登録
-    const scenarios = await getScenarios(db);
-    for (const scenario of scenarios) {
-      if (scenario.trigger_type === 'friend_add' && scenario.is_active) {
-        try {
-          const existing = await db
-            .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
-            .bind(friend.id, scenario.id)
-            .first<{ id: string }>();
-          if (!existing) {
-            const friendScenario = await enrollFriendInScenario(db, friend.id, scenario.id);
+    // 優先順位: friend の ref_code → entry_route.scenario_id → 全 friend_add シナリオ
+    const friendRow = await db
+      .prepare(`SELECT ref_code FROM friends WHERE id = ?`)
+      .bind(friend.id)
+      .first<{ ref_code: string | null }>();
+    const refCode = friendRow?.ref_code ?? null;
 
-            // Immediate delivery: if the first step has delay=0, send it now
-            // instead of waiting for the next cron run (up to 5 minutes)
-            // NOTE: Uses pushMessage (not replyMessage) because replyToken can only be used once
-            // and may be needed for competing immediate deliveries. Future optimization could
-            // prioritize reply if available and only one step is due immediately.
-            const steps = await getScenarioSteps(db, scenario.id);
-            const firstStep = steps[0];
-            if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
-              try {
-                const message = buildMessage(firstStep.message_type, firstStep.message_content);
-                await lineClient.pushMessage(userId, [message]);
-                console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
+    let scenariosToEnroll: { id: string; is_active: number | boolean }[] = [];
 
-                // Log outgoing message
-                const logId = crypto.randomUUID();
-                await db
-                  .prepare(
-                    `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                     VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
-                  )
-                  .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, jstNow())
-                  .run();
+    if (refCode) {
+      const route = await getEntryRouteByRefCode(db, refCode);
+      if (route?.scenario_id) {
+        const s = await getScenarioById(db, route.scenario_id);
+        if (s && s.is_active) scenariosToEnroll = [s];
+      }
+    }
 
-                // Advance or complete the friend_scenario
-                const secondStep = steps[1] ?? null;
-                if (secondStep) {
-                  const nextDeliveryDate = new Date(Date.now() + 9 * 60 * 60_000);
-                  nextDeliveryDate.setMinutes(nextDeliveryDate.getMinutes() + secondStep.delay_minutes);
-                  await advanceFriendScenario(db, friendScenario.id, firstStep.step_order, nextDeliveryDate.toISOString().slice(0, -1) + '+09:00');
-                } else {
-                  await completeFriendScenario(db, friendScenario.id);
-                }
-              } catch (err) {
-                console.error('Failed immediate delivery for scenario', scenario.id, err);
+    // fallback: all active friend_add scenarios for this account
+    if (scenariosToEnroll.length === 0) {
+      const allScenarios = await getScenarios(db, lineAccountId);
+      scenariosToEnroll = allScenarios.filter(s => s.trigger_type === 'friend_add' && s.is_active);
+    }
+
+    for (const scenario of scenariosToEnroll) {
+      try {
+        const existing = await db
+          .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
+          .bind(friend.id, scenario.id)
+          .first<{ id: string }>();
+        if (!existing) {
+          const friendScenario = await enrollFriendInScenario(db, friend.id, scenario.id);
+
+          // Immediate delivery: if the first step has delay=0, send it now
+          const steps = await getScenarioSteps(db, scenario.id);
+          const firstStep = steps[0];
+          if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
+            try {
+              const content = applyVars(firstStep.message_content, { name: profile?.displayName ?? '' });
+              const message = buildMessage(firstStep.message_type, content);
+              await lineClient.pushMessage(userId, [message]);
+              console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
+
+              // Log outgoing message
+              const logId = crypto.randomUUID();
+              await db
+                .prepare(
+                  `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                   VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+                )
+                .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, jstNow())
+                .run();
+
+              // Advance or complete the friend_scenario
+              const secondStep = steps[1] ?? null;
+              if (secondStep) {
+                const nextDeliveryDate = new Date(Date.now() + 9 * 60 * 60_000);
+                nextDeliveryDate.setMinutes(nextDeliveryDate.getMinutes() + secondStep.delay_minutes);
+                await advanceFriendScenario(db, friendScenario.id, firstStep.step_order, nextDeliveryDate.toISOString().slice(0, -1) + '+09:00');
+              } else {
+                await completeFriendScenario(db, friendScenario.id);
               }
+            } catch (err) {
+              console.error('Failed immediate delivery for scenario', scenario.id, err);
             }
           }
-        } catch (err) {
-          console.error('Failed to enroll friend in scenario', scenario.id, err);
         }
+      } catch (err) {
+        console.error('Failed to enroll friend in scenario', scenario.id, err);
       }
     }
 

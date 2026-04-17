@@ -99,8 +99,9 @@ async function processSingleDelivery(
     return;
   }
 
-  // Build and send the message
-  const message = buildMessage(currentStep.message_type, currentStep.message_content);
+  // Build and send the message (with variable substitution)
+  const content = applyVars(currentStep.message_content, { name: friend.display_name ?? '' });
+  const message = buildMessage(currentStep.message_type, content);
   await lineClient.pushMessage(friend.line_user_id, [message]);
 
   // Log outgoing message
@@ -172,6 +173,10 @@ async function evaluateCondition(
     default:
       return true;
   }
+}
+
+export function applyVars(content: string, vars: Record<string, string>): string {
+  return content.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? `{${key}}`);
 }
 
 export function buildMessage(messageType: string, messageContent: string): Message {

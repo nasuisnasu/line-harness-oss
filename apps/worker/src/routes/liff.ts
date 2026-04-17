@@ -11,13 +11,14 @@ import {
   jstNow,
   getLineAccountById,
   getScenarios,
+  getScenarioById,
   enrollFriendInScenario,
   getScenarioSteps,
   advanceFriendScenario,
   completeFriendScenario,
 } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
-import { buildMessage } from '../services/step-delivery.js';
+import { buildMessage, applyVars } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
 const liffRoutes = new Hono<Env>();
@@ -378,14 +379,28 @@ liffRoutes.post('/api/liff/link', async (c) => {
       }
     }
 
-    // For existing friends: trigger friend_add scenarios they haven't been enrolled in yet
+    // For existing friends: trigger the appropriate scenario
     if (body.alreadyFriend && lineAccountId) {
       const account = await getLineAccountById(db, lineAccountId);
       if (account) {
         const lineClient = new LineClient(account.channel_access_token);
-        const scenarios = await getScenarios(db, lineAccountId);
-        for (const scenario of scenarios) {
-          if (scenario.trigger_type === 'friend_add' && scenario.is_active) {
+
+        // Prefer entry_route.scenario_id, fall back to all friend_add scenarios
+        let scenariosToEnroll: { id: string; is_active: number | boolean; trigger_type?: string }[] = [];
+        if (ref) {
+          const route = await getEntryRouteByRefCode(db, ref);
+          if (route?.scenario_id) {
+            const s = await getScenarioById(db, route.scenario_id);
+            if (s && s.is_active) scenariosToEnroll = [s];
+          }
+        }
+        if (scenariosToEnroll.length === 0) {
+          const all = await getScenarios(db, lineAccountId);
+          scenariosToEnroll = all.filter(s => s.trigger_type === 'friend_add' && s.is_active);
+        }
+
+        for (const scenario of scenariosToEnroll) {
+          if (true) {
             const existing = await db
               .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
               .bind(friend.id, scenario.id)
@@ -396,7 +411,8 @@ liffRoutes.post('/api/liff/link', async (c) => {
               const firstStep = steps[0];
               if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
                 try {
-                  const message = buildMessage(firstStep.message_type, firstStep.message_content);
+                  const content = applyVars(firstStep.message_content, { name: friend.display_name ?? '' });
+                  const message = buildMessage(firstStep.message_type, content);
                   await lineClient.pushMessage(lineUserId, [message]);
 
                   const logId = crypto.randomUUID();
