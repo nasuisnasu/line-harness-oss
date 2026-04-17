@@ -6,6 +6,7 @@ import { api, type ApiBroadcast } from '@/lib/api'
 import Header from '@/components/layout/header'
 import BroadcastForm from '@/components/broadcasts/broadcast-form'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/lib/account-context'
 
 const ccPrompts = [
   {
@@ -54,14 +55,16 @@ export default function BroadcastsPage() {
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const { selectedAccount } = useAccount()
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
+      const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
       const [broadcastsRes, tagsRes] = await Promise.all([
-        api.broadcasts.list(),
-        api.tags.list(),
+        api.broadcasts.list(params),
+        api.tags.list(params),
       ])
       if (broadcastsRes.success) setBroadcasts(broadcastsRes.data)
       else setError(broadcastsRes.error)
@@ -71,7 +74,7 @@ export default function BroadcastsPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedAccount])
 
   useEffect(() => { load() }, [load])
 

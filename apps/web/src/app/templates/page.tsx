@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/lib/account-context'
 
 interface Template {
   id: string
@@ -71,13 +72,16 @@ export default function TemplatesPage() {
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const { selectedAccount } = useAccount()
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
+      const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
       const res = await api.templates.list(
-        selectedCategory !== 'all' ? selectedCategory : undefined
+        selectedCategory !== 'all' ? selectedCategory : undefined,
+        params
       )
       if (res.success) {
         setTemplates(res.data)
@@ -89,7 +93,7 @@ export default function TemplatesPage() {
     } finally {
       setLoading(false)
     }
-  }, [selectedCategory])
+  }, [selectedCategory, selectedAccount])
 
   useEffect(() => {
     load()
@@ -115,12 +119,13 @@ export default function TemplatesPage() {
     setSaving(true)
     setFormError('')
     try {
+      const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
       const res = await api.templates.create({
         name: form.name,
         category: form.category,
         messageType: form.messageType,
         messageContent: form.messageContent,
-      })
+      }, params)
       if (res.success) {
         setShowCreate(false)
         setForm({ name: '', category: '', messageType: 'text', messageContent: '' })

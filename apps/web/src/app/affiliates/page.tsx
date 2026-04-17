@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Header from '@/components/layout/header'
 
 import { fetchApi } from '@/lib/api'
+import { useAccount } from '@/lib/account-context'
 
 const WORKER_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
@@ -41,17 +42,19 @@ export default function AttributionPage() {
   const [detail, setDetail] = useState<RefDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const { selectedAccount } = useAccount()
 
   const loadSummary = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetchApi<{ success: boolean; data: RefSummaryData }>('/api/analytics/ref-summary')
+      const params = selectedAccount ? `?lineAccountId=${selectedAccount.id}` : ''
+      const res = await fetchApi<{ success: boolean; data: RefSummaryData }>(`/api/analytics/ref-summary${params}`)
       setSummary(res.data)
     } catch {
       // silent
     }
     setLoading(false)
-  }, [])
+  }, [selectedAccount])
 
   useEffect(() => {
     loadSummary()
@@ -66,7 +69,8 @@ export default function AttributionPage() {
     setSelectedRef(refCode)
     setDetailLoading(true)
     try {
-      const res = await fetchApi<{ success: boolean; data: RefDetailData }>(`/api/analytics/ref/${encodeURIComponent(refCode)}`)
+      const params = selectedAccount ? `?lineAccountId=${selectedAccount.id}` : ''
+      const res = await fetchApi<{ success: boolean; data: RefDetailData }>(`/api/analytics/ref/${encodeURIComponent(refCode)}${params}`)
       setDetail(res.data)
     } catch {
       setDetail(null)

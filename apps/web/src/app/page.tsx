@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/lib/account-context'
 
 const ccPrompts = [
   {
@@ -81,16 +82,18 @@ export default function DashboardPage() {
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const { selectedAccount } = useAccount()
 
   useEffect(() => {
     const load = async () => {
       setLoading(true)
       setError('')
       try {
+        const accountParams = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
         const [friendCountRes, scenariosRes, broadcastsRes, templatesRes, automationsRes, scoringRes] = await Promise.allSettled([
-          api.friends.count(),
-          api.scenarios.list(),
-          api.broadcasts.list(),
+          api.friends.count(accountParams),
+          api.scenarios.list(accountParams),
+          api.broadcasts.list(accountParams),
           api.templates.list(),
           api.automations.list(),
           api.scoring.rules(),
@@ -128,9 +131,8 @@ export default function DashboardPage() {
         setLoading(false)
       }
     }
-
     load()
-  }, [])
+  }, [selectedAccount])
 
   return (
     <div>

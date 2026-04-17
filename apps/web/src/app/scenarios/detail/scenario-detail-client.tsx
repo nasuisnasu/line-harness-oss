@@ -115,8 +115,9 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
   const [error, setError] = useState('')
 
   const [editing, setEditing] = useState(false)
-  const [editForm, setEditForm] = useState({ name: '', description: '', triggerType: 'friend_add' as ScenarioTriggerType, isActive: true })
+  const [editForm, setEditForm] = useState({ name: '', description: '', triggerType: 'friend_add' as ScenarioTriggerType, triggerTagId: '', isActive: true })
   const [saving, setSaving] = useState(false)
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([])
 
   const [showStepForm, setShowStepForm] = useState(false)
   const [editingStepId, setEditingStepId] = useState<string | null>(null)
@@ -135,6 +136,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
           name: res.data.name,
           description: res.data.description ?? '',
           triggerType: res.data.triggerType,
+          triggerTagId: res.data.triggerTagId ?? '',
           isActive: res.data.isActive,
         })
       } else {
@@ -149,6 +151,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
 
   useEffect(() => {
     loadScenario()
+    api.tags.list().then((res) => { if (res.success) setTags(res.data) }).catch(() => {})
   }, [loadScenario])
 
   const handleSaveScenario = async () => {
@@ -159,6 +162,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
         name: editForm.name,
         description: editForm.description || null,
         triggerType: editForm.triggerType,
+        triggerTagId: editForm.triggerType === 'tag_added' ? (editForm.triggerTagId || null) : null,
         isActive: editForm.isActive,
       })
       if (res.success) {
@@ -319,13 +323,28 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
               <select
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
                 value={editForm.triggerType}
-                onChange={(e) => setEditForm({ ...editForm, triggerType: e.target.value as ScenarioTriggerType })}
+                onChange={(e) => setEditForm({ ...editForm, triggerType: e.target.value as ScenarioTriggerType, triggerTagId: '' })}
               >
                 {triggerOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             </div>
+            {editForm.triggerType === 'tag_added' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">対象タグ <span className="text-red-500">*</span></label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  value={editForm.triggerTagId}
+                  onChange={(e) => setEditForm({ ...editForm, triggerTagId: e.target.value })}
+                >
+                  <option value="">タグを選択...</option>
+                  {tags.map((tag) => (
+                    <option key={tag.id} value={tag.id}>{tag.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -352,6 +371,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                     name: scenario.name,
                     description: scenario.description ?? '',
                     triggerType: scenario.triggerType,
+                    triggerTagId: scenario.triggerTagId ?? '',
                     isActive: scenario.isActive,
                   })
                 }}

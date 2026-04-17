@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import ScenarioList from '@/components/scenarios/scenario-list'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/lib/account-context'
 
 const ccPrompts = [
   {
@@ -48,6 +49,7 @@ export default function ScenariosPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([])
   const [form, setForm] = useState<CreateFormState>({
     name: '',
     description: '',
@@ -57,12 +59,14 @@ export default function ScenariosPage() {
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const { selectedAccount } = useAccount()
 
   const loadScenarios = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const res = await api.scenarios.list()
+      const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
+      const res = await api.scenarios.list(params)
       if (res.success) {
         setScenarios(res.data)
       } else {
@@ -73,11 +77,13 @@ export default function ScenariosPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedAccount])
 
   useEffect(() => {
     loadScenarios()
-  }, [loadScenarios])
+    const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
+    api.tags.list(params).then((res) => { if (res.success) setTags(res.data) }).catch(() => {})
+  }, [loadScenarios, selectedAccount])
 
   const handleCreate = async () => {
     if (!form.name.trim()) {
@@ -185,6 +191,21 @@ export default function ScenariosPage() {
                 ))}
               </select>
             </div>
+            {form.triggerType === 'tag_added' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">対象タグ <span className="text-red-500">*</span></label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  value={form.triggerTagId}
+                  onChange={(e) => setForm({ ...form, triggerTagId: e.target.value })}
+                >
+                  <option value="">タグを選択</option>
+                  {tags.map((tag) => (
+                    <option key={tag.id} value={tag.id}>{tag.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
