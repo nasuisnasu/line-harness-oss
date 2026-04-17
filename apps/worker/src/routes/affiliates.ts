@@ -27,7 +27,8 @@ function serializeAffiliate(row: { id: string; name: string; code: string; commi
 // GET /api/affiliates - list all
 affiliates.get('/api/affiliates', async (c) => {
   try {
-    const items = await getAffiliates(c.env.DB);
+    const lineAccountId = c.req.query('lineAccountId') ?? undefined;
+    const items = await getAffiliates(c.env.DB, lineAccountId);
     return c.json({ success: true, data: items.map(serializeAffiliate) });
   } catch (err) {
     console.error('GET /api/affiliates error:', err);
@@ -62,7 +63,8 @@ affiliates.post('/api/affiliates', async (c) => {
       return c.json({ success: false, error: 'name and code are required' }, 400);
     }
 
-    const item = await createAffiliate(c.env.DB, body);
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
+    const item = await createAffiliate(c.env.DB, { ...body, lineAccountId });
     return c.json({ success: true, data: serializeAffiliate(item) }, 201);
   } catch (err) {
     console.error('POST /api/affiliates error:', err);

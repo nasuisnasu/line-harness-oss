@@ -5,6 +5,7 @@ export type BroadcastMessageType = 'text' | 'image' | 'flex';
 
 export interface Broadcast {
   id: string;
+  line_account_id: string | null;
   title: string;
   message_type: BroadcastMessageType;
   message_content: string;
@@ -18,7 +19,14 @@ export interface Broadcast {
   created_at: string;
 }
 
-export async function getBroadcasts(db: D1Database): Promise<Broadcast[]> {
+export async function getBroadcasts(db: D1Database, lineAccountId?: string): Promise<Broadcast[]> {
+  if (lineAccountId) {
+    const result = await db
+      .prepare(`SELECT * FROM broadcasts WHERE line_account_id = ? ORDER BY created_at DESC`)
+      .bind(lineAccountId)
+      .all<Broadcast>();
+    return result.results;
+  }
   const result = await db
     .prepare(`SELECT * FROM broadcasts ORDER BY created_at DESC`)
     .all<Broadcast>();
@@ -42,6 +50,7 @@ export interface CreateBroadcastInput {
   targetType: BroadcastTargetType;
   targetTagId?: string | null;
   scheduledAt?: string | null;
+  lineAccountId?: string | null;
 }
 
 export async function createBroadcast(
@@ -56,11 +65,12 @@ export async function createBroadcast(
   await db
     .prepare(
       `INSERT INTO broadcasts
-         (id, title, message_type, message_content, target_type, target_tag_id, status, scheduled_at, sent_at, total_count, success_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
+         (id, line_account_id, title, message_type, message_content, target_type, target_tag_id, status, scheduled_at, sent_at, total_count, success_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
     )
     .bind(
       id,
+      input.lineAccountId ?? null,
       input.title,
       input.messageType,
       input.messageContent,

@@ -35,7 +35,8 @@ function serializeBroadcast(row: DbBroadcast) {
 // GET /api/broadcasts - list all
 broadcasts.get('/api/broadcasts', async (c) => {
   try {
-    const items = await getBroadcasts(c.env.DB);
+    const lineAccountId = c.req.query('lineAccountId');
+    const items = await getBroadcasts(c.env.DB, lineAccountId);
     return c.json({ success: true, data: items.map(serializeBroadcast) });
   } catch (err) {
     console.error('GET /api/broadcasts error:', err);
@@ -86,6 +87,7 @@ broadcasts.post('/api/broadcasts', async (c) => {
       );
     }
 
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
     const broadcast = await createBroadcast(c.env.DB, {
       title: body.title,
       messageType: body.messageType,
@@ -93,6 +95,7 @@ broadcasts.post('/api/broadcasts', async (c) => {
       targetType: body.targetType,
       targetTagId: body.targetTagId ?? null,
       scheduledAt: body.scheduledAt ?? null,
+      lineAccountId,
     });
 
     return c.json({ success: true, data: serializeBroadcast(broadcast) }, 201);

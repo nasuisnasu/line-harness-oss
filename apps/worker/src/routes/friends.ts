@@ -47,6 +47,9 @@ friends.get('/api/friends', async (c) => {
     const limit = Number(c.req.query('limit') ?? '50');
     const offset = Number(c.req.query('offset') ?? '0');
     const tagId = c.req.query('tagId');
+    const lineAccountIdParam = c.req.query('lineAccountId');
+    // undefined = no filter, string = filter by account
+    const lineAccountId: string | undefined = lineAccountIdParam;
 
     const db = c.env.DB;
 
@@ -54,17 +57,21 @@ friends.get('/api/friends', async (c) => {
     const totalPromise = tagId
       ? db
           .prepare(
-            `SELECT COUNT(*) as count FROM friends f
-             INNER JOIN friend_tags ft ON ft.friend_id = f.id
-             WHERE ft.tag_id = ?`,
+            lineAccountId !== undefined
+              ? `SELECT COUNT(*) as count FROM friends f
+                 INNER JOIN friend_tags ft ON ft.friend_id = f.id
+                 WHERE ft.tag_id = ? AND f.line_account_id = ?`
+              : `SELECT COUNT(*) as count FROM friends f
+                 INNER JOIN friend_tags ft ON ft.friend_id = f.id
+                 WHERE ft.tag_id = ?`,
           )
-          .bind(tagId)
+          .bind(...(lineAccountId !== undefined ? [tagId, lineAccountId] : [tagId]))
           .first<{ count: number }>()
           .then((row) => row?.count ?? 0)
-      : getFriendCount(db);
+      : getFriendCount(db, lineAccountId);
 
     const [items, total] = await Promise.all([
-      getFriends(db, { limit, offset, tagId }),
+      getFriends(db, { limit, offset, tagId, lineAccountId }),
       totalPromise,
     ]);
 
@@ -95,7 +102,8 @@ friends.get('/api/friends', async (c) => {
 // GET /api/friends/count - friend count (must be before /:id)
 friends.get('/api/friends/count', async (c) => {
   try {
-    const count = await getFriendCount(c.env.DB);
+    const lineAccountId = c.req.query('lineAccountId');
+    const count = await getFriendCount(c.env.DB, lineAccountId);
     return c.json({ success: true, data: { count } });
   } catch (err) {
     console.error('GET /api/friends/count error:', err);

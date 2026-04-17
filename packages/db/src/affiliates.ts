@@ -9,6 +9,7 @@ export interface Affiliate {
   code: string;
   commission_rate: number;
   is_active: number;
+  line_account_id: string | null;
   created_at: string;
 }
 
@@ -22,7 +23,13 @@ export interface AffiliateClick {
 
 // ── Affiliate CRUD ──────────────────────────────────────────────────────────
 
-export async function getAffiliates(db: D1Database): Promise<Affiliate[]> {
+export async function getAffiliates(db: D1Database, lineAccountId?: string | null): Promise<Affiliate[]> {
+  if (lineAccountId) {
+    const result = await db
+      .prepare(`SELECT * FROM affiliates WHERE line_account_id = ? OR line_account_id IS NULL ORDER BY created_at DESC`)
+      .bind(lineAccountId).all<Affiliate>();
+    return result.results;
+  }
   const result = await db
     .prepare(`SELECT * FROM affiliates ORDER BY created_at DESC`)
     .all<Affiliate>();
@@ -57,17 +64,17 @@ export interface CreateAffiliateInput {
 
 export async function createAffiliate(
   db: D1Database,
-  input: CreateAffiliateInput,
+  input: CreateAffiliateInput & { lineAccountId?: string | null },
 ): Promise<Affiliate> {
   const id = crypto.randomUUID();
   const now = jstNow();
 
   await db
     .prepare(
-      `INSERT INTO affiliates (id, name, code, commission_rate, is_active, created_at)
-       VALUES (?, ?, ?, ?, 1, ?)`,
+      `INSERT INTO affiliates (id, name, code, commission_rate, is_active, line_account_id, created_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?)`,
     )
-    .bind(id, input.name, input.code, input.commissionRate ?? 0, now)
+    .bind(id, input.name, input.code, input.commissionRate ?? 0, input.lineAccountId ?? null, now)
     .run();
 
   return (await getAffiliateById(db, id))!;

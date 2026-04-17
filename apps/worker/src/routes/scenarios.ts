@@ -70,7 +70,8 @@ function serializeFriendScenario(row: DbFriendScenario) {
 // GET /api/scenarios - list all
 scenarios.get('/api/scenarios', async (c) => {
   try {
-    const items = await getScenarios(c.env.DB);
+    const lineAccountId = c.req.query('lineAccountId');
+    const items = await getScenarios(c.env.DB, lineAccountId);
     return c.json({
       success: true,
       data: items.map((row) => ({
@@ -122,11 +123,13 @@ scenarios.post('/api/scenarios', async (c) => {
       return c.json({ success: false, error: 'name and triggerType are required' }, 400);
     }
 
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
     let scenario = await createScenario(c.env.DB, {
       name: body.name,
       description: body.description ?? null,
       triggerType: body.triggerType,
       triggerTagId: body.triggerTagId ?? null,
+      lineAccountId,
     });
 
     // createScenario() always sets is_active=1; override if the caller requested inactive

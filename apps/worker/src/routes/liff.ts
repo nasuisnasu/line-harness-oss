@@ -329,9 +329,14 @@ liffRoutes.post('/api/liff/link', async (c) => {
     const email = verified.email || null;
 
     const db = c.env.DB;
-    const friend = await getFriendByLineUserId(db, lineUserId);
+    let friend = await getFriendByLineUserId(db, lineUserId);
     if (!friend) {
-      return c.json({ success: false, error: 'Friend not found' }, 404);
+      friend = await upsertFriend(db, {
+        lineUserId,
+        displayName: body.displayName || verified.name || null,
+        pictureUrl: null,
+        statusMessage: null,
+      });
     }
 
     if ((friend as unknown as Record<string, unknown>).user_id) {
@@ -375,6 +380,10 @@ liffRoutes.post('/api/liff/link', async (c) => {
 liffRoutes.get('/api/analytics/ref-summary', async (c) => {
   try {
     const db = c.env.DB;
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
+
+    const accountFilter = lineAccountId ? `WHERE er.line_account_id = ?` : '';
+    const accountValues: unknown[] = lineAccountId ? [lineAccountId] : [];
 
     const rows = await db
       .prepare(
@@ -386,9 +395,11 @@ liffRoutes.get('/api/analytics/ref-summary', async (c) => {
           MAX(rt.created_at) as latest_at
         FROM entry_routes er
         LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
+        ${accountFilter}
         GROUP BY er.ref_code, er.name
         ORDER BY friend_count DESC`,
       )
+      .bind(...accountValues)
       .all<{
         ref_code: string;
         name: string;
@@ -397,12 +408,21 @@ liffRoutes.get('/api/analytics/ref-summary', async (c) => {
         latest_at: string | null;
       }>();
 
+    const friendsQuery = lineAccountId
+      ? `SELECT COUNT(*) as count FROM friends WHERE line_account_id = ?`
+      : `SELECT COUNT(*) as count FROM friends`;
+    const friendsWithRefQuery = lineAccountId
+      ? `SELECT COUNT(*) as count FROM friends WHERE (ref_code IS NOT NULL AND ref_code != '') AND line_account_id = ?`
+      : `SELECT COUNT(*) as count FROM friends WHERE ref_code IS NOT NULL AND ref_code != ''`;
+
     const totalFriendsRes = await db
-      .prepare(`SELECT COUNT(*) as count FROM friends`)
+      .prepare(friendsQuery)
+      .bind(...(lineAccountId ? [lineAccountId] : []))
       .first<{ count: number }>();
 
     const friendsWithRefRes = await db
-      .prepare(`SELECT COUNT(*) as count FROM friends WHERE ref_code IS NOT NULL AND ref_code != ''`)
+      .prepare(friendsWithRefQuery)
+      .bind(...(lineAccountId ? [lineAccountId] : []))
       .first<{ count: number }>();
 
     const totalFriends = totalFriendsRes?.count ?? 0;
@@ -436,6 +456,7 @@ liffRoutes.get('/api/analytics/ref/:refCode', async (c) => {
   try {
     const db = c.env.DB;
     const refCode = c.req.param('refCode');
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
 
     const routeRow = await db
       .prepare(`SELECT ref_code, name FROM entry_routes WHERE ref_code = ?`)
@@ -446,6 +467,9 @@ liffRoutes.get('/api/analytics/ref/:refCode', async (c) => {
       return c.json({ success: false, error: 'Entry route not found' }, 404);
     }
 
+    const accountCond = lineAccountId ? ` AND f.line_account_id = ?` : '';
+    const friendBindValues: unknown[] = lineAccountId ? [refCode, refCode, lineAccountId] : [refCode, refCode];
+
     const friends = await db
       .prepare(
         `SELECT
@@ -455,10 +479,10 @@ liffRoutes.get('/api/analytics/ref/:refCode', async (c) => {
           rt.created_at as tracked_at
         FROM friends f
         LEFT JOIN ref_tracking rt ON f.id = rt.friend_id AND rt.ref_code = ?
-        WHERE f.ref_code = ?
+        WHERE f.ref_code = ?${accountCond}
         ORDER BY rt.created_at DESC`,
       )
-      .bind(refCode, refCode)
+      .bind(...friendBindValues)
       .all<{
         id: string;
         display_name: string;
@@ -616,7 +640,6 @@ function completionPage(displayName: string, pictureUrl: string | null, ref: str
       <p class="name">${escapeHtml(displayName)} さん</p>
     </div>
     <p class="message">ありがとうございます！<br>これからお役立ち情報をお届けします。<br>このページは閉じて大丈夫です。</p>
-    ${ref ? `<p class="ref">${escapeHtml(ref)}</p>` : ''}
   </div>
 </body>
 </html>`;

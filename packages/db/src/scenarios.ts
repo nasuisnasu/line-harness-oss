@@ -5,6 +5,7 @@ export type FriendScenarioStatus = 'active' | 'paused' | 'completed';
 
 export interface Scenario {
   id: string;
+  line_account_id: string | null;
   name: string;
   description: string | null;
   trigger_type: ScenarioTriggerType;
@@ -48,15 +49,18 @@ export interface FriendScenario {
 
 export type ScenarioWithStepCount = Scenario & { step_count: number };
 
-export async function getScenarios(db: D1Database): Promise<ScenarioWithStepCount[]> {
+export async function getScenarios(db: D1Database, lineAccountId?: string): Promise<ScenarioWithStepCount[]> {
+  const where = lineAccountId ? `WHERE s.line_account_id = ?` : '';
   const result = await db
     .prepare(
       `SELECT s.*, COUNT(ss.id) as step_count
        FROM scenarios s
        LEFT JOIN scenario_steps ss ON s.id = ss.scenario_id
+       ${where}
        GROUP BY s.id
        ORDER BY s.created_at DESC`,
     )
+    .bind(...(lineAccountId ? [lineAccountId] : []))
     .all<ScenarioWithStepCount>();
   return result.results;
 }
@@ -87,6 +91,7 @@ export interface CreateScenarioInput {
   description?: string | null;
   triggerType: ScenarioTriggerType;
   triggerTagId?: string | null;
+  lineAccountId?: string | null;
 }
 
 export async function createScenario(
@@ -98,11 +103,12 @@ export async function createScenario(
 
   await db
     .prepare(
-      `INSERT INTO scenarios (id, name, description, trigger_type, trigger_tag_id, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO scenarios (id, line_account_id, name, description, trigger_type, trigger_tag_id, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     )
     .bind(
       id,
+      input.lineAccountId ?? null,
       input.name,
       input.description ?? null,
       input.triggerType,
