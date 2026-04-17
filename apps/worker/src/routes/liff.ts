@@ -9,7 +9,15 @@ import {
   recordRefTracking,
   addTagToFriend,
   jstNow,
+  getLineAccountById,
+  getScenarios,
+  enrollFriendInScenario,
+  getScenarioSteps,
+  advanceFriendScenario,
+  completeFriendScenario,
 } from '@line-crm/db';
+import { LineClient } from '@line-crm/line-sdk';
+import { buildMessage } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
 const liffRoutes = new Hono<Env>();
@@ -305,6 +313,8 @@ liffRoutes.post('/api/liff/link', async (c) => {
     const body = await c.req.json<{
       idToken: string;
       displayName?: string | null;
+      ref?: string | null;
+      alreadyFriend?: boolean;
     }>();
 
     if (!body.idToken) {
@@ -327,6 +337,7 @@ liffRoutes.post('/api/liff/link', async (c) => {
     const verified = await verifyRes.json<{ sub: string; email?: string; name?: string }>();
     const lineUserId = verified.sub;
     const email = verified.email || null;
+    const ref = body.ref || null;
 
     const db = c.env.DB;
     let friend = await getFriendByLineUserId(db, lineUserId);
@@ -337,6 +348,82 @@ liffRoutes.post('/api/liff/link', async (c) => {
         pictureUrl: null,
         statusMessage: null,
       });
+    }
+
+    // Attribution tracking — always record ref if provided
+    let lineAccountId: string | null = null;
+    if (ref) {
+      // Save ref_code on friend (first touch wins)
+      await db
+        .prepare(`UPDATE friends SET ref_code = ? WHERE id = ? AND ref_code IS NULL`)
+        .bind(ref, friend.id)
+        .run();
+
+      const route = await getEntryRouteByRefCode(db, ref);
+      await recordRefTracking(db, {
+        refCode: ref,
+        friendId: friend.id,
+        entryRouteId: route?.id ?? null,
+        sourceUrl: null,
+      });
+
+      if (route?.tag_id) {
+        await addTagToFriend(db, friend.id, route.tag_id);
+        // Derive lineAccountId from tag
+        const tagRow = await db
+          .prepare(`SELECT line_account_id FROM tags WHERE id = ?`)
+          .bind(route.tag_id)
+          .first<{ line_account_id: string | null }>();
+        lineAccountId = tagRow?.line_account_id ?? null;
+      }
+    }
+
+    // For existing friends: trigger friend_add scenarios they haven't been enrolled in yet
+    if (body.alreadyFriend && lineAccountId) {
+      const account = await getLineAccountById(db, lineAccountId);
+      if (account) {
+        const lineClient = new LineClient(account.channel_access_token);
+        const scenarios = await getScenarios(db, lineAccountId);
+        for (const scenario of scenarios) {
+          if (scenario.trigger_type === 'friend_add' && scenario.is_active) {
+            const existing = await db
+              .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
+              .bind(friend.id, scenario.id)
+              .first<{ id: string }>();
+            if (!existing) {
+              const friendScenario = await enrollFriendInScenario(db, friend.id, scenario.id);
+              const steps = await getScenarioSteps(db, scenario.id);
+              const firstStep = steps[0];
+              if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
+                try {
+                  const message = buildMessage(firstStep.message_type, firstStep.message_content);
+                  await lineClient.pushMessage(lineUserId, [message]);
+
+                  const logId = crypto.randomUUID();
+                  await db
+                    .prepare(
+                      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+                    )
+                    .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, jstNow())
+                    .run();
+
+                  const secondStep = steps[1] ?? null;
+                  if (secondStep) {
+                    const nextDeliveryDate = new Date(Date.now() + 9 * 60 * 60_000);
+                    nextDeliveryDate.setMinutes(nextDeliveryDate.getMinutes() + secondStep.delay_minutes);
+                    await advanceFriendScenario(db, friendScenario.id, firstStep.step_order, nextDeliveryDate.toISOString().slice(0, -1) + '+09:00');
+                  } else {
+                    await completeFriendScenario(db, friendScenario.id);
+                  }
+                } catch (err) {
+                  console.error('Failed immediate delivery for existing friend, scenario', scenario.id, err);
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     if ((friend as unknown as Record<string, unknown>).user_id) {

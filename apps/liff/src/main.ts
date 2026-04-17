@@ -139,7 +139,6 @@ function showCompletion(profile: { displayName: string; pictureUrl?: string }, i
         }
         <br>このページは閉じて大丈夫です。
       </p>
-      ${ref ? `<p class="ref-badge">${escapeHtml(ref)}</p>` : ''}
     </div>
   `;
 
@@ -185,6 +184,7 @@ async function linkAndAddFlow() {
         displayName: profile.displayName,
         existingUuid: existingUuid,
         ref: ref,
+        alreadyFriend: friendship.friendFlag,
       }),
     }).then(async (res) => {
       if (res.ok) {
