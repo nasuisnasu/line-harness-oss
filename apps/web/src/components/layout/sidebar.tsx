@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useAccount } from '@/lib/account-context'
 
 // ─── メニュー定義（ユーザー目線のカテゴリ） ───
 
@@ -12,6 +13,7 @@ const menuSections = [
     items: [
       { href: '/', label: 'ダッシュボード', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
       { href: '/friends', label: '友だち管理', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
+      { href: '/tags', label: 'タグ管理', icon: 'M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z' },
       { href: '/chats', label: '個別チャット', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
     ],
   },
@@ -62,6 +64,8 @@ function NavIcon({ d }: { d: string }) {
 export default function Sidebar() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const { accounts, selectedAccount, setSelectedAccount } = useAccount()
 
   useEffect(() => { setIsOpen(false) }, [pathname])
   useEffect(() => {
@@ -85,6 +89,49 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
+
+      {/* アカウント切替 */}
+      <div className="px-3 py-3 border-b border-gray-200 relative">
+          <button
+            onClick={() => setAccountMenuOpen(!accountMenuOpen)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors text-left"
+          >
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: '#06C755' }}>
+              {selectedAccount?.name?.[0] ?? 'L'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-gray-800 truncate leading-tight">
+                {selectedAccount?.name ?? 'アカウント未選択'}
+              </p>
+              <p className="text-[10px] text-gray-400 leading-tight">アカウント切替</p>
+            </div>
+            <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${accountMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {accountMenuOpen && (
+            <div className="absolute left-3 right-3 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+              {accounts.map((account) => (
+                <button
+                  key={account.id}
+                  onClick={() => { setSelectedAccount(account); setAccountMenuOpen(false) }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors ${selectedAccount?.id === account.id ? 'bg-green-50' : ''}`}
+                >
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ backgroundColor: '#06C755' }}>
+                    {account.name[0]}
+                  </div>
+                  <span className="text-xs text-gray-700 truncate">{account.name}</span>
+                  {selectedAccount?.id === account.id && (
+                    <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
       {/* ナビゲーション */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
