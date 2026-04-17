@@ -26,7 +26,15 @@ export default function EntryRoutesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ refCode: '', name: '', tagId: '' })
   const [saving, setSaving] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
   const { selectedAccount } = useAccount()
+
+  const copyUrl = (url: string, id: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(id)
+      setTimeout(() => setCopied(null), 1500)
+    })
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -135,8 +143,14 @@ export default function EntryRoutesPage() {
                       <span className="text-xs px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: tag.color }}>{tag.name}</span>
                     )}
                   </div>
-                  <div className="text-xs text-gray-500 font-mono truncate">
-                    {baseUrl}?ref={r.refCode}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-gray-500 font-mono truncate">{baseUrl}?ref={r.refCode}</span>
+                    <button
+                      onClick={() => copyUrl(`${baseUrl}?ref=${r.refCode}`, r.id)}
+                      className="flex-shrink-0 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
+                    >
+                      {copied === r.id ? 'コピー済' : 'コピー'}
+                    </button>
                   </div>
                 </div>
                 <div className="mx-4 text-right flex-shrink-0">
