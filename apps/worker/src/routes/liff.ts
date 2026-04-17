@@ -377,6 +377,14 @@ liffRoutes.post('/api/liff/link', async (c) => {
           .first<{ line_account_id: string | null }>();
         lineAccountId = tagRow?.line_account_id ?? null;
       }
+      // Fallback: derive lineAccountId from scenario if tag didn't have it
+      if (!lineAccountId && route?.scenario_id) {
+        const scenarioRow = await db
+          .prepare(`SELECT line_account_id FROM scenarios WHERE id = ?`)
+          .bind(route.scenario_id)
+          .first<{ line_account_id: string | null }>();
+        lineAccountId = scenarioRow?.line_account_id ?? null;
+      }
     }
 
     // For existing friends: trigger the appropriate scenario

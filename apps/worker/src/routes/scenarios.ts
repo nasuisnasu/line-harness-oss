@@ -123,7 +123,7 @@ scenarios.post('/api/scenarios', async (c) => {
       return c.json({ success: false, error: 'name and triggerType are required' }, 400);
     }
 
-    const lineAccountId = c.req.query('lineAccountId') ?? null;
+    const lineAccountId = c.req.query('lineAccountId') ?? (body as Record<string, unknown>).lineAccountId as string ?? null;
     let scenario = await createScenario(c.env.DB, {
       name: body.name,
       description: body.description ?? null,
