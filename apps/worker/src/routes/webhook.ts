@@ -176,15 +176,23 @@ async function handleEvent(
               await lineClient.pushMessage(userId, [message]);
               console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
 
-              // Log outgoing message
+              // Log outgoing message and ensure chat room
               const logId = crypto.randomUUID();
+              const logNow = jstNow();
               await db
                 .prepare(
                   `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
                    VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
                 )
-                .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, jstNow())
+                .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, logNow)
                 .run();
+              const existingChat = await db.prepare(`SELECT id FROM chats WHERE friend_id = ?`).bind(friend.id).first<{ id: string }>();
+              if (existingChat) {
+                await db.prepare(`UPDATE chats SET last_message_at = ?, updated_at = ? WHERE id = ?`).bind(logNow, logNow, existingChat.id).run();
+              } else {
+                await db.prepare(`INSERT INTO chats (id, friend_id, status, last_message_at, created_at, updated_at) VALUES (?, ?, 'unread', ?, ?, ?)`)
+                  .bind(crypto.randomUUID(), friend.id, logNow, logNow, logNow).run();
+              }
 
               // Advance or complete the friend_scenario
               const secondStep = steps[1] ?? null;

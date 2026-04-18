@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/lib/account-context'
 
 interface Chat {
   id: string
@@ -89,6 +90,7 @@ export default function ChatsPage() {
   const [sending, setSending] = useState(false)
   const [notes, setNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
+  const { selectedAccount } = useAccount()
 
   const loadChats = useCallback(async () => {
     setLoading(true)
@@ -96,6 +98,7 @@ export default function ChatsPage() {
     try {
       const params: Record<string, string> = {}
       if (statusFilter !== 'all') params.status = statusFilter
+      if (selectedAccount) params.lineAccountId = selectedAccount.id
       const res = await api.chats.list(params)
       if (res.success) {
         setChats(res.data as unknown as Chat[])
@@ -107,7 +110,7 @@ export default function ChatsPage() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter])
+  }, [statusFilter, selectedAccount])
 
   const loadChatDetail = useCallback(async (chatId: string) => {
     setDetailLoading(true)
@@ -123,6 +126,10 @@ export default function ChatsPage() {
       setDetailLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    setSelectedChatId(null)
+  }, [selectedAccount])
 
   useEffect(() => {
     loadChats()

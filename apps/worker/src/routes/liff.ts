@@ -432,13 +432,23 @@ liffRoutes.post('/api/liff/link', async (c) => {
                   await lineClient.pushMessage(lineUserId, [message]);
 
                   const logId = crypto.randomUUID();
+                  const logNow = jstNow();
                   await db
                     .prepare(
                       `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
                        VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
                     )
-                    .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, jstNow())
+                    .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, logNow)
                     .run();
+
+                  // Ensure chat room exists
+                  const existingChat = await db.prepare(`SELECT id FROM chats WHERE friend_id = ?`).bind(friend.id).first<{ id: string }>();
+                  if (existingChat) {
+                    await db.prepare(`UPDATE chats SET last_message_at = ?, updated_at = ? WHERE id = ?`).bind(logNow, logNow, existingChat.id).run();
+                  } else {
+                    await db.prepare(`INSERT INTO chats (id, friend_id, status, last_message_at, created_at, updated_at) VALUES (?, ?, 'unread', ?, ?, ?)`)
+                      .bind(crypto.randomUUID(), friend.id, logNow, logNow, logNow).run();
+                  }
 
                   const secondStep = steps[1] ?? null;
                   if (secondStep) {

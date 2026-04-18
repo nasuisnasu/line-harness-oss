@@ -106,13 +106,23 @@ async function processSingleDelivery(
 
   // Log outgoing message
   const logId = crypto.randomUUID();
+  const now = jstNow();
   await db
     .prepare(
       `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
        VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
     )
-    .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow())
+    .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, now)
     .run();
+
+  // Ensure chat room exists and is up-to-date
+  const existing = await db.prepare(`SELECT id FROM chats WHERE friend_id = ?`).bind(friend.id).first<{ id: string }>();
+  if (existing) {
+    await db.prepare(`UPDATE chats SET last_message_at = ?, updated_at = ? WHERE id = ?`).bind(now, now, existing.id).run();
+  } else {
+    await db.prepare(`INSERT INTO chats (id, friend_id, status, last_message_at, created_at, updated_at) VALUES (?, ?, 'unread', ?, ?, ?)`)
+      .bind(crypto.randomUUID(), friend.id, now, now, now).run();
+  }
 
   // Determine next step (find the step after currentStep in the sorted list)
   const currentIndex = steps.indexOf(currentStep);

@@ -80,14 +80,19 @@ chats.get('/api/chats', async (c) => {
   try {
     const status = c.req.query('status') ?? undefined;
     const operatorId = c.req.query('operatorId') ?? undefined;
+    const lineAccountId = c.req.query('lineAccountId') ?? undefined;
 
-    // JOIN friends to get display_name and picture_url
+    // JOIN friends to get display_name, picture_url, and account filter
     let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id
                FROM chats c
                LEFT JOIN friends f ON c.friend_id = f.id`;
     const conditions: string[] = [];
     const bindings: unknown[] = [];
 
+    if (lineAccountId) {
+      conditions.push('f.line_account_id = ?');
+      bindings.push(lineAccountId);
+    }
     if (status) {
       conditions.push('c.status = ?');
       bindings.push(status);
