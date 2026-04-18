@@ -31,14 +31,14 @@ entryRoutes.get('/api/entry-routes', async (c) => {
 
     // アカウントフィルター + 流入人数をJOINで取得
     const query = lineAccountId
-      ? `SELECT er.*, COUNT(rt.id) as count
+      ? `SELECT er.*, COUNT(DISTINCT rt.friend_id) as count
          FROM entry_routes er
          LEFT JOIN tags t ON er.tag_id = t.id
          LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
          WHERE t.line_account_id = ?
          GROUP BY er.id
          ORDER BY er.created_at DESC`
-      : `SELECT er.*, COUNT(rt.id) as count
+      : `SELECT er.*, COUNT(DISTINCT rt.friend_id) as count
          FROM entry_routes er
          LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
          GROUP BY er.id

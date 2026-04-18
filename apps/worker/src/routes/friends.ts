@@ -75,11 +75,22 @@ friends.get('/api/friends', async (c) => {
       totalPromise,
     ]);
 
-    // Fetch tags for each friend in parallel so the list response includes tags
+    // Fetch tags and active scenarios for each friend in parallel
     const itemsWithTags = await Promise.all(
       items.map(async (friend) => {
-        const tags = await getFriendTags(db, friend.id);
-        return { ...serializeFriend(friend), tags: tags.map(serializeTag) };
+        const [tags, activeScenarios] = await Promise.all([
+          getFriendTags(db, friend.id),
+          db.prepare(
+            `SELECT s.id, s.name FROM friend_scenarios fs
+             JOIN scenarios s ON s.id = fs.scenario_id
+             WHERE fs.friend_id = ? AND fs.status = 'active'`
+          ).bind(friend.id).all<{ id: string; name: string }>(),
+        ]);
+        return {
+          ...serializeFriend(friend),
+          tags: tags.map(serializeTag),
+          activeScenarios: activeScenarios.results,
+        };
       }),
     );
 

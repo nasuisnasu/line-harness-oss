@@ -185,6 +185,20 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
                           <p className="text-xs text-gray-600 font-mono">{friend.lineUserId}</p>
                         </div>
 
+                        {/* Active scenarios */}
+                        {friend.activeScenarios?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 mb-1">配信中のシナリオ</p>
+                            <div className="flex flex-wrap gap-1">
+                              {friend.activeScenarios.map((s) => (
+                                <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                  {s.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Tag management */}
                         <div>
                           <p className="text-xs font-semibold text-gray-500 mb-2">タグ管理</p>

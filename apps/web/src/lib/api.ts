@@ -63,7 +63,7 @@ export type FriendListParams = {
   lineAccountId?: string
 }
 
-export type FriendWithTags = Friend & { tags: Tag[] }
+export type FriendWithTags = Friend & { tags: Tag[]; activeScenarios: { id: string; name: string }[] }
 
 export const api = {
   friends: {
