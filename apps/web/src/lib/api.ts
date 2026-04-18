@@ -86,6 +86,12 @@ export const api = {
       fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/tags/${tagId}`, {
         method: 'DELETE',
       }),
+    scenarios: (friendId: string) =>
+      fetchApi<ApiResponse<{
+        id: string; scenarioId: string; scenarioName: string;
+        status: string; currentStepOrder: number; startedAt: string; nextDeliveryAt: string | null;
+        steps: { stepOrder: number; messageType: string; messageContent: string; delayMinutes: number; sent: boolean }[];
+      }[]>>(`/api/friends/${friendId}/scenarios`),
   },
   tags: {
     list: (params?: { lineAccountId?: string }) =>

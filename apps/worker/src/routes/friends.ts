@@ -150,6 +150,61 @@ friends.get('/api/friends/:id', async (c) => {
   }
 });
 
+// GET /api/friends/:id/scenarios - scenario enrollment history with step details
+friends.get('/api/friends/:id/scenarios', async (c) => {
+  try {
+    const friendId = c.req.param('id');
+    const db = c.env.DB;
+
+    const rows = await db.prepare(`
+      SELECT
+        fs.id, fs.status, fs.current_step_order, fs.started_at, fs.next_delivery_at,
+        s.id as scenario_id, s.name as scenario_name,
+        ss.step_order, ss.message_type, ss.message_content, ss.delay_minutes
+      FROM friend_scenarios fs
+      JOIN scenarios s ON s.id = fs.scenario_id
+      LEFT JOIN scenario_steps ss ON ss.scenario_id = fs.scenario_id
+      WHERE fs.friend_id = ?
+      ORDER BY fs.started_at DESC, ss.step_order ASC
+    `).bind(friendId).all<{
+      id: string; status: string; current_step_order: number; started_at: string; next_delivery_at: string | null;
+      scenario_id: string; scenario_name: string;
+      step_order: number | null; message_type: string | null; message_content: string | null; delay_minutes: number | null;
+    }>();
+
+    // Group steps under each friend_scenario
+    const map = new Map<string, {
+      id: string; scenarioId: string; scenarioName: string;
+      status: string; currentStepOrder: number; startedAt: string; nextDeliveryAt: string | null;
+      steps: { stepOrder: number; messageType: string; messageContent: string; delayMinutes: number; sent: boolean }[];
+    }>();
+    for (const row of rows.results) {
+      if (!map.has(row.id)) {
+        map.set(row.id, {
+          id: row.id, scenarioId: row.scenario_id, scenarioName: row.scenario_name,
+          status: row.status, currentStepOrder: row.current_step_order,
+          startedAt: row.started_at, nextDeliveryAt: row.next_delivery_at,
+          steps: [],
+        });
+      }
+      if (row.step_order !== null) {
+        map.get(row.id)!.steps.push({
+          stepOrder: row.step_order,
+          messageType: row.message_type ?? 'text',
+          messageContent: row.message_content ?? '',
+          delayMinutes: row.delay_minutes ?? 0,
+          sent: row.step_order < row.current_step_order,
+        });
+      }
+    }
+
+    return c.json({ success: true, data: Array.from(map.values()) });
+  } catch (err) {
+    console.error('GET /api/friends/:id/scenarios error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // POST /api/friends/:id/tags - add tag
 friends.post('/api/friends/:id/tags', async (c) => {
   try {

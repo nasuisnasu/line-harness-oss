@@ -12,18 +12,32 @@ interface FriendTableProps {
   onRefresh: () => void
 }
 
+type ScenarioHistory = {
+  id: string; scenarioId: string; scenarioName: string;
+  status: string; currentStepOrder: number; startedAt: string; nextDeliveryAt: string | null;
+  steps: { stepOrder: number; messageType: string; messageContent: string; delayMinutes: number; sent: boolean }[];
+}
+
 export default function FriendTable({ friends, allTags, onRefresh }: FriendTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [addingTagForFriend, setAddingTagForFriend] = useState<string | null>(null)
   const [selectedTagId, setSelectedTagId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [scenarioHistories, setScenarioHistories] = useState<Record<string, ScenarioHistory[]>>({})
 
-  const toggleExpand = (id: string) => {
-    setExpandedId(expandedId === id ? null : id)
+  const toggleExpand = async (id: string) => {
+    const next = expandedId === id ? null : id
+    setExpandedId(next)
     setAddingTagForFriend(null)
     setSelectedTagId('')
     setError('')
+    if (next && !scenarioHistories[id]) {
+      try {
+        const res = await api.friends.scenarios(id)
+        if (res.success) setScenarioHistories(prev => ({ ...prev, [id]: res.data }))
+      } catch { /* ignore */ }
+    }
   }
 
   const handleAddTag = async (friendId: string) => {
@@ -110,7 +124,7 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
                 <tr
                   key={friend.id}
                   className="hover:bg-gray-50 cursor-pointer transition-colors"
-                  onClick={() => toggleExpand(friend.id)}
+                  onClick={() => { void toggleExpand(friend.id) }}
                 >
                   {/* Avatar + Name */}
                   <td className="px-4 py-3">
@@ -185,19 +199,31 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
                           <p className="text-xs text-gray-600 font-mono">{friend.lineUserId}</p>
                         </div>
 
-                        {/* Active scenarios */}
-                        {friend.activeScenarios?.length > 0 && (
-                          <div>
-                            <p className="text-xs font-semibold text-gray-500 mb-1">配信中のシナリオ</p>
-                            <div className="flex flex-wrap gap-1">
-                              {friend.activeScenarios.map((s) => (
-                                <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                                  {s.name}
-                                </span>
+                        {/* Scenario delivery history */}
+                        {(scenarioHistories[friend.id] ?? []).map((sc) => (
+                          <div key={sc.id}>
+                            <p className="text-xs font-semibold text-gray-500 mb-1">
+                              シナリオ: {sc.scenarioName}
+                              <span className={`ml-2 px-1.5 py-0.5 rounded text-xs font-medium ${
+                                sc.status === 'active' ? 'bg-blue-100 text-blue-700' :
+                                sc.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                'bg-gray-100 text-gray-500'
+                              }`}>{sc.status === 'active' ? '配信中' : sc.status === 'completed' ? '完了' : sc.status}</span>
+                            </p>
+                            <div className="space-y-1 ml-2">
+                              {sc.steps.map((step) => (
+                                <div key={step.stepOrder} className="flex items-start gap-2 text-xs">
+                                  <span className={`mt-0.5 w-3 h-3 rounded-full flex-shrink-0 ${step.sent ? 'bg-green-400' : 'bg-gray-300'}`} />
+                                  <span className={step.sent ? 'text-gray-700' : 'text-gray-400'}>
+                                    {step.delayMinutes === 0 ? '即時' : `${step.delayMinutes}分後`}
+                                    {'　'}
+                                    {step.messageContent.slice(0, 40)}{step.messageContent.length > 40 ? '…' : ''}
+                                  </span>
+                                </div>
                               ))}
                             </div>
                           </div>
-                        )}
+                        ))}
 
                         {/* Tag management */}
                         <div>
