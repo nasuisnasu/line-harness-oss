@@ -385,6 +385,14 @@ liffRoutes.post('/api/liff/link', async (c) => {
           .first<{ line_account_id: string | null }>();
         lineAccountId = scenarioRow?.line_account_id ?? null;
       }
+
+      // Update friend's line_account_id if not set (pre-existing friends missed webhook)
+      if (lineAccountId) {
+        await db
+          .prepare(`UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL`)
+          .bind(lineAccountId, friend.id)
+          .run();
+      }
     }
 
     // For existing friends: trigger the appropriate scenario
