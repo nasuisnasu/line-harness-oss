@@ -43,12 +43,13 @@ export default function FriendsPage() {
 
   const loadTags = useCallback(async () => {
     try {
-      const res = await api.tags.list()
+      const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
+      const res = await api.tags.list(params)
       if (res.success) setAllTags(res.data)
     } catch {
       // Non-blocking — tags used for filter
     }
-  }, [])
+  }, [selectedAccount])
 
   const loadFriends = useCallback(async () => {
     setLoading(true)

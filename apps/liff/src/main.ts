@@ -26,6 +26,7 @@ declare const liff: {
   getDecodedIDToken(): { sub: string; name?: string; email?: string; picture?: string } | null;
   getFriendship(): Promise<{ friendFlag: boolean }>;
   isInClient(): boolean;
+  openWindow(opts: { url: string; external?: boolean }): void;
   closeWindow(): void;
 };
 
@@ -123,30 +124,29 @@ function showFriendAdd(profile: { displayName: string; pictureUrl?: string }) {
 
 function showCompletion(profile: { displayName: string; pictureUrl?: string }, isRecovery: boolean) {
   const container = document.getElementById('app')!;
-  const ref = getRef();
   container.innerHTML = `
     <div class="card">
-      <div class="check-icon">${isRecovery ? '🔄' : '✓'}</div>
-      <h2>${isRecovery ? 'おかえりなさい！' : '登録完了！'}</h2>
+      <div class="check-icon">✓</div>
+      <h2>登録完了！</h2>
       <div class="profile">
         ${profile.pictureUrl ? `<img src="${profile.pictureUrl}" alt="" />` : ''}
         <p class="name">${escapeHtml(profile.displayName)} さん</p>
       </div>
       <p class="message">
-        ${isRecovery
-          ? '以前のアカウント情報を引き継ぎました。'
-          : 'ありがとうございます！これからお役立ち情報をお届けします。'
-        }
-        <br>このページは閉じて大丈夫です。
+        セミナーお申し込みありがとうございます！<br>
+        このまましばらくお待ちください😊
       </p>
     </div>
   `;
 
-  // LINE内ブラウザなら3秒後に自動で閉じる
+  // LINE内ブラウザならトーク画面を開いて閉じる
   if (liff.isInClient()) {
     setTimeout(() => {
+      try {
+        liff.openWindow({ url: `https://line.me/ti/p/${BOT_BASIC_ID}`, external: false });
+      } catch { /* ignore */ }
       try { liff.closeWindow(); } catch { /* ignore */ }
-    }, 3000);
+    }, 1500);
   }
 }
 
