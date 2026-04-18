@@ -112,7 +112,7 @@ export default function EntryRoutesPage() {
   }
 
   const liffId = '2009821004-brTkmVVK'
-  const baseUrl = `https://liff.line.me/${liffId}`
+  const baseUrl = `https://line.me/R/app/${liffId}`
 
   return (
     <div>
@@ -192,9 +192,9 @@ export default function EntryRoutesPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-500 font-mono truncate">{baseUrl}?ref={r.refCode}</span>
+                      <span className="text-xs text-gray-500 font-mono truncate">{baseUrl}?liff.state=%3Fref%3D{r.refCode}</span>
                       <button
-                        onClick={() => copyUrl(`${baseUrl}?ref=${r.refCode}`, r.id)}
+                        onClick={() => copyUrl(`${baseUrl}?liff.state=%3Fref%3D${r.refCode}`, r.id)}
                         className="flex-shrink-0 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
                       >
                         {copied === r.id ? 'コピー済' : 'コピー'}
