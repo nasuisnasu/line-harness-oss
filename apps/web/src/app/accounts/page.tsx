@@ -39,6 +39,9 @@ export default function AccountsPage() {
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ channelId: '', name: '', channelAccessToken: '', channelSecret: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', channelAccessToken: '', channelSecret: '' })
+  const [editSaving, setEditSaving] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -73,6 +76,26 @@ export default function AccountsPage() {
     if (!confirm('このLINEアカウントを削除しますか？')) return
     await api.lineAccounts.delete(id)
     load()
+  }
+
+  const openEdit = (account: LineAccountListItem) => {
+    setEditingId(account.id)
+    setEditForm({ name: account.name, channelAccessToken: '', channelSecret: '' })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingId) return
+    setEditSaving(true)
+    try {
+      const payload: Record<string, string> = { name: editForm.name }
+      if (editForm.channelAccessToken) payload.channelAccessToken = editForm.channelAccessToken
+      if (editForm.channelSecret) payload.channelSecret = editForm.channelSecret
+      await api.lineAccounts.update(editingId, payload)
+      setEditingId(null)
+      load()
+    } finally {
+      setEditSaving(false)
+    }
   }
 
   const handleToggle = async (id: string, currentActive: boolean) => {
@@ -187,17 +210,34 @@ export default function AccountsPage() {
                   {account.isActive ? '有効' : '無効'}
                 </button>
               </div>
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-400">
-                  登録: {new Date(account.createdAt).toLocaleDateString('ja-JP')}
-                </p>
-                <button
-                  onClick={() => handleDelete(account.id)}
-                  className="text-red-500 hover:text-red-700 text-xs"
-                >
-                  削除
-                </button>
-              </div>
+              {editingId === account.id ? (
+                <div className="space-y-2 mt-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">アカウント名</label>
+                    <input className="w-full border border-gray-300 rounded px-2 py-1 text-sm" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Channel Access Token（変更する場合のみ）</label>
+                    <input type="password" className="w-full border border-gray-300 rounded px-2 py-1 text-sm" placeholder="変更しない場合は空欄" value={editForm.channelAccessToken} onChange={e => setEditForm({ ...editForm, channelAccessToken: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Channel Secret（変更する場合のみ）</label>
+                    <input type="password" className="w-full border border-gray-300 rounded px-2 py-1 text-sm" placeholder="変更しない場合は空欄" value={editForm.channelSecret} onChange={e => setEditForm({ ...editForm, channelSecret: e.target.value })} />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={handleSaveEdit} disabled={editSaving} className="px-3 py-1 text-sm text-white rounded disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>{editSaving ? '保存中...' : '保存'}</button>
+                    <button onClick={() => setEditingId(null)} className="px-3 py-1 text-sm text-gray-600 bg-gray-100 rounded">キャンセル</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between mt-4">
+                  <p className="text-xs text-gray-400">登録: {new Date(account.createdAt).toLocaleDateString('ja-JP')}</p>
+                  <div className="flex gap-2">
+                    <button onClick={() => openEdit(account)} className="text-blue-500 hover:text-blue-700 text-xs">編集</button>
+                    <button onClick={() => handleDelete(account.id)} className="text-red-500 hover:text-red-700 text-xs">削除</button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
