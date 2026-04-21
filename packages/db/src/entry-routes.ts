@@ -27,6 +27,7 @@ export interface CreateEntryRouteInput {
   scenarioId?: string | null;
   redirectUrl?: string | null;
   isActive?: boolean;
+  lineAccountId?: string | null;
 }
 
 export async function getEntryRoutes(db: D1Database): Promise<EntryRoute[]> {
@@ -57,8 +58,8 @@ export async function createEntryRoute(
   await db
     .prepare(
       `INSERT INTO entry_routes
-         (id, ref_code, name, tag_id, scenario_id, redirect_url, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, ref_code, name, tag_id, scenario_id, redirect_url, is_active, line_account_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -68,6 +69,7 @@ export async function createEntryRoute(
       input.scenarioId ?? null,
       input.redirectUrl ?? null,
       isActive,
+      input.lineAccountId ?? null,
       now,
       now,
     )

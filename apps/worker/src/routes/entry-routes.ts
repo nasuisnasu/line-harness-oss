@@ -66,6 +66,7 @@ entryRoutes.post('/api/entry-routes', async (c) => {
       scenarioId?: string | null;
       redirectUrl?: string | null;
       isActive?: boolean;
+      lineAccountId?: string | null;
     }>();
     if (!body.refCode || !body.name) {
       return c.json({ success: false, error: 'refCode and name are required' }, 400);
@@ -77,6 +78,7 @@ entryRoutes.post('/api/entry-routes', async (c) => {
       scenarioId: body.scenarioId ?? null,
       redirectUrl: body.redirectUrl ?? null,
       isActive: body.isActive !== false,
+      lineAccountId: body.lineAccountId ?? null,
     });
     return c.json({ success: true, data: serialize(item) }, 201);
   } catch (err) {

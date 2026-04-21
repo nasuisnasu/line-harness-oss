@@ -78,6 +78,8 @@ export interface Scenario {
   triggerTagId: string | null;
   /** 有効/無効フラグ */
   isActive: boolean;
+  /** LINEアカウントID */
+  lineAccountId?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
   /** 更新日時 (ISO 8601) */

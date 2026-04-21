@@ -72,6 +72,7 @@ export default function EntryRoutesPage() {
         name: form.name,
         tagId: form.tagId || null,
         scenarioId: form.scenarioId || null,
+        lineAccountId: selectedAccount?.id ?? null,
       })
       if (res.success) {
         setShowCreate(false)

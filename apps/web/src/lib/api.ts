@@ -458,7 +458,7 @@ export const api = {
   },
   entryRoutes: {
     list: (params?: { lineAccountId?: string }) => fetchApi<{ success: boolean; data: { id: string; refCode: string; name: string; tagId: string | null; scenarioId: string | null; isActive: boolean; createdAt: string; count: number }[] }>('/api/entry-routes' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')),
-    create: (data: { refCode: string; name: string; tagId?: string | null; scenarioId?: string | null }) =>
+    create: (data: { refCode: string; name: string; tagId?: string | null; scenarioId?: string | null; lineAccountId?: string | null }) =>
       fetchApi<{ success: boolean; data: unknown }>('/api/entry-routes', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: { name?: string; tagId?: string | null; scenarioId?: string | null }) =>
       fetchApi<{ success: boolean; data: unknown }>(`/api/entry-routes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
