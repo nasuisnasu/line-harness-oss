@@ -48,10 +48,11 @@ webhook.post('/webhook', async (c) => {
 
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const lineAccessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const discordWebhookUrl = c.env.DISCORD_WEBHOOK_URL;
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, lineAccessToken);
+        await handleEvent(db, lineClient, event, lineAccessToken, undefined, discordWebhookUrl);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -91,10 +92,11 @@ webhook.post('/webhook/:accountId', async (c) => {
   }
 
   const lineClient = new LineClient(account.channel_access_token);
+  const discordWebhookUrl = c.env.DISCORD_WEBHOOK_URL;
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, account.channel_access_token, accountId);
+        await handleEvent(db, lineClient, event, account.channel_access_token, accountId, discordWebhookUrl);
       } catch (err) {
         console.error('Error handling webhook event for account', accountId, err);
       }
@@ -111,6 +113,7 @@ async function handleEvent(
   event: WebhookEvent,
   lineAccessToken: string,
   lineAccountId?: string,
+  discordWebhookUrl?: string,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -215,6 +218,17 @@ async function handleEvent(
 
     // イベントバス発火: friend_add
     await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name } }, lineAccessToken);
+
+    // Discord通知
+    if (discordWebhookUrl) {
+      const name = profile?.displayName ?? '不明';
+      const source = refCode ? `流入: ${refCode}` : '流入: 不明';
+      await fetch(discordWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: `🎉 LINE友だち追加: **${name}** | ${source}` }),
+      }).catch(() => {});
+    }
     return;
   }
 

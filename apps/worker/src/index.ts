@@ -43,6 +43,7 @@ export type Env = {
     LINE_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
+    DISCORD_WEBHOOK_URL?: string;
   };
 };
 

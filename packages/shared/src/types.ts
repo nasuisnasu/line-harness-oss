@@ -104,6 +104,12 @@ export interface ScenarioStep {
   messageType: MessageType;
   /** メッセージ内容 (テキスト or JSONシリアライズ済みFlexメッセージ等) */
   messageContent: string;
+  /** 配信条件種別 */
+  conditionType: string | null;
+  /** 配信条件値 (タグIDなど) */
+  conditionValue: string | null;
+  /** 条件不成立時のジャンプ先ステップ順序 */
+  nextStepOnFalse?: number | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }

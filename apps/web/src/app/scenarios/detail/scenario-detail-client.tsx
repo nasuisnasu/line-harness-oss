@@ -41,6 +41,8 @@ interface StepFormState {
   delayMinutes: number
   messageType: MessageType
   messageContent: string
+  conditionType: string
+  conditionValue: string
 }
 
 const emptyStepForm: StepFormState = {
@@ -48,6 +50,13 @@ const emptyStepForm: StepFormState = {
   delayMinutes: 0,
   messageType: 'text',
   messageContent: '',
+  conditionType: '',
+  conditionValue: '',
+}
+
+const conditionTypeLabels: Record<string, string> = {
+  tag_exists: 'タグあり',
+  tag_not_exists: 'タグなし',
 }
 
 function FlexPreview({ content }: { content: string }) {
@@ -192,6 +201,8 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
       delayMinutes: step.delayMinutes,
       messageType: step.messageType,
       messageContent: step.messageContent,
+      conditionType: step.conditionType ?? '',
+      conditionValue: step.conditionValue ?? '',
     })
     setEditingStepId(step.id)
     setShowStepForm(true)
@@ -206,12 +217,17 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
     setStepSaving(true)
     setStepError('')
     try {
+      const conditionPayload = {
+        conditionType: stepForm.conditionType || null,
+        conditionValue: (stepForm.conditionType && stepForm.conditionValue) ? stepForm.conditionValue : null,
+      }
       if (editingStepId) {
         const res = await api.scenarios.updateStep(id, editingStepId, {
           stepOrder: stepForm.stepOrder,
           delayMinutes: stepForm.delayMinutes,
           messageType: stepForm.messageType,
           messageContent: stepForm.messageContent,
+          ...conditionPayload,
         })
         if (!res.success) {
           setStepError(res.error)
@@ -223,6 +239,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
           delayMinutes: stepForm.delayMinutes,
           messageType: stepForm.messageType,
           messageContent: stepForm.messageContent,
+          ...conditionPayload,
         })
         if (!res.success) {
           setStepError(res.error)
@@ -479,6 +496,32 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                 />
               </div>
 
+              {/* Condition */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">配信条件</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white mb-2"
+                  value={stepForm.conditionType}
+                  onChange={(e) => setStepForm({ ...stepForm, conditionType: e.target.value, conditionValue: '' })}
+                >
+                  <option value="">条件なし（全員に配信）</option>
+                  <option value="tag_not_exists">タグなし（タグが付いていない人）</option>
+                  <option value="tag_exists">タグあり（タグが付いている人）</option>
+                </select>
+                {(stepForm.conditionType === 'tag_exists' || stepForm.conditionType === 'tag_not_exists') && (
+                  <select
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                    value={stepForm.conditionValue}
+                    onChange={(e) => setStepForm({ ...stepForm, conditionValue: e.target.value })}
+                  >
+                    <option value="">タグを選択...</option>
+                    {tags.map((tag) => (
+                      <option key={tag.id} value={tag.id}>{tag.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
               {stepError && <p className="text-xs text-red-600">{stepError}</p>}
 
               <div className="flex gap-2">
@@ -517,7 +560,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2">
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
                         <span
                           className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-white shrink-0"
                           style={{ backgroundColor: '#06C755' }}
@@ -532,6 +575,16 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                         }`}>
                           {messageTypeOptions.find(o => o.value === step.messageType)?.label ?? step.messageType}
                         </span>
+                        {step.conditionType && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200">
+                            🔒 {conditionTypeLabels[step.conditionType] ?? step.conditionType}
+                            {step.conditionValue && (
+                              <span className="text-yellow-600">
+                                : {tags.find(t => t.id === step.conditionValue)?.name ?? step.conditionValue}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-gray-700 bg-gray-50 rounded-md px-3 py-2">
                         {step.messageType === 'text' ? (
