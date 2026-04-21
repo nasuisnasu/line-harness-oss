@@ -30,11 +30,13 @@ declare const liff: {
   closeWindow(): void;
 };
 
-const _urlParams = new URLSearchParams(window.location.search);
-const LIFF_ID = _urlParams.get('liffId') || import.meta.env?.VITE_LIFF_ID || '';
+const _rawParams = new URLSearchParams(window.location.search);
+const _liffState = _rawParams.get('liff.state') || '';
+const _stateParams = new URLSearchParams(_liffState.startsWith('?') ? _liffState.slice(1) : _liffState);
+const LIFF_ID = _stateParams.get('liffId') || _rawParams.get('liffId') || import.meta.env?.VITE_LIFF_ID || '';
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 const UUID_STORAGE_KEY = 'lh_uuid';
-const BOT_BASIC_ID = _urlParams.get('botId') || import.meta.env?.VITE_BOT_BASIC_ID || '';
+const BOT_BASIC_ID = _stateParams.get('botId') || _rawParams.get('botId') || import.meta.env?.VITE_BOT_BASIC_ID || '';
 
 function apiCall(path: string, options?: RequestInit): Promise<Response> {
   return fetch(`${API_URL}${path}`, {
