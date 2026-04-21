@@ -114,7 +114,7 @@ export default function EntryRoutesPage() {
 
   const liffIdMap: Record<string, { liffId: string; botId: string }> = {
     'd49a3a13-8169-4b25-a669-3c8a4f4f964d': { liffId: '2009821004-brTkmVVK', botId: '@513qujqi' },
-    '40adcb23-277b-4d9d-b6e2-92fde47d31fb': { liffId: '2006855304-UfNPHFOn', botId: '' },
+    '40adcb23-277b-4d9d-b6e2-92fde47d31fb': { liffId: '2006855304-UfNPHFOn', botId: '@893nrbyp' },
   }
   const accountMeta = selectedAccount ? liffIdMap[selectedAccount.id] : null
   const liffId = accountMeta?.liffId ?? '2009821004-brTkmVVK'
