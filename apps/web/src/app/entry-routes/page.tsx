@@ -112,7 +112,11 @@ export default function EntryRoutesPage() {
     load()
   }
 
-  const liffId = '2009821004-brTkmVVK'
+  const liffIdMap: Record<string, string> = {
+    'd49a3a13-8169-4b25-a669-3c8a4f4f964d': '2009821004-brTkmVVK', // 酒井優弥
+    '40adcb23-277b-4d9d-b6e2-92fde47d31fb': '2009236600-QC3kLonX', // 元英弱ニキ
+  }
+  const liffId = (selectedAccount && liffIdMap[selectedAccount.id]) ?? '2009821004-brTkmVVK'
   const baseUrl = `https://line.me/R/app/${liffId}`
 
   return (
