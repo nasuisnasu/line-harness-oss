@@ -112,11 +112,13 @@ export default function EntryRoutesPage() {
     load()
   }
 
-  const liffIdMap: Record<string, string> = {
-    'd49a3a13-8169-4b25-a669-3c8a4f4f964d': '2009821004-brTkmVVK', // 酒井優弥
-    '40adcb23-277b-4d9d-b6e2-92fde47d31fb': '2009236600-QC3kLonX', // 元英弱ニキ
+  const liffIdMap: Record<string, { liffId: string; botId: string }> = {
+    'd49a3a13-8169-4b25-a669-3c8a4f4f964d': { liffId: '2009821004-brTkmVVK', botId: '@513qujqi' },
+    '40adcb23-277b-4d9d-b6e2-92fde47d31fb': { liffId: '2006855304-UfNPHFOn', botId: '' },
   }
-  const liffId = (selectedAccount && liffIdMap[selectedAccount.id]) ?? '2009821004-brTkmVVK'
+  const accountMeta = selectedAccount ? liffIdMap[selectedAccount.id] : null
+  const liffId = accountMeta?.liffId ?? '2009821004-brTkmVVK'
+  const botId = accountMeta?.botId ?? '@513qujqi'
   const baseUrl = `https://line.me/R/app/${liffId}`
 
   return (
@@ -197,9 +199,9 @@ export default function EntryRoutesPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-500 font-mono truncate">{baseUrl}?liff.state=%3Fref%3D{r.refCode}</span>
+                      <span className="text-xs text-gray-500 font-mono truncate">{baseUrl}?liff.state={encodeURIComponent(`?liffId=${liffId}&botId=${botId}&ref=${r.refCode}`)}</span>
                       <button
-                        onClick={() => copyUrl(`${baseUrl}?liff.state=%3Fref%3D${r.refCode}`, r.id)}
+                        onClick={() => copyUrl(`${baseUrl}?liff.state=${encodeURIComponent(`?liffId=${liffId}&botId=${botId}&ref=${r.refCode}`)}`, r.id)}
                         className="flex-shrink-0 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
                       >
                         {copied === r.id ? 'コピー済' : 'コピー'}

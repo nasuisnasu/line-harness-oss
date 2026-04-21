@@ -30,11 +30,11 @@ declare const liff: {
   closeWindow(): void;
 };
 
-const LIFF_ID = import.meta.env?.VITE_LIFF_ID || '';
+const _urlParams = new URLSearchParams(window.location.search);
+const LIFF_ID = _urlParams.get('liffId') || import.meta.env?.VITE_LIFF_ID || '';
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 const UUID_STORAGE_KEY = 'lh_uuid';
-// LINE公式アカウントの友だち追加URL（LINE Developers Console → Messaging API → Bot basic ID）
-const BOT_BASIC_ID = import.meta.env?.VITE_BOT_BASIC_ID || '';
+const BOT_BASIC_ID = _urlParams.get('botId') || import.meta.env?.VITE_BOT_BASIC_ID || '';
 
 function apiCall(path: string, options?: RequestInit): Promise<Response> {
   return fetch(`${API_URL}${path}`, {
