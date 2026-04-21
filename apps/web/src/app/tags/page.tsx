@@ -21,6 +21,9 @@ export default function TagsPage() {
   const [newColor, setNewColor] = useState('#06C755')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
   const { selectedAccount } = useAccount()
 
   const loadTags = useCallback(async () => {
@@ -75,6 +78,23 @@ export default function TagsPage() {
       setFormError('作成に失敗しました')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleEdit = (tag: Tag) => {
+    setEditingId(tag.id)
+    setEditName(tag.name)
+  }
+
+  const handleSaveEdit = async (id: string) => {
+    if (!editName.trim()) return
+    setEditSaving(true)
+    try {
+      await api.tags.update(id, { name: editName.trim() })
+      setEditingId(null)
+      loadTags()
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -185,28 +205,41 @@ export default function TagsPage() {
                   className="w-3 h-3 rounded-full flex-shrink-0"
                   style={{ backgroundColor: tag.color }}
                 />
-                <span className="text-sm font-medium text-gray-800 truncate">{tag.name}</span>
+                {editingId === tag.id ? (
+                  <input
+                    type="text"
+                    className="flex-1 border border-gray-300 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-green-500"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(tag.id); if (e.key === 'Escape') setEditingId(null) }}
+                    autoFocus
+                  />
+                ) : (
+                  <span className="text-sm font-medium text-gray-800 truncate">{tag.name}</span>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-2xl font-bold text-gray-900">
-                  {tagCounts[tag.id] ?? '—'}
-                </span>
-                <span className="text-xs text-gray-400">人</span>
-              </div>
-              <div className="flex gap-2 mt-1">
-                <a
-                  href={`/friends?tagId=${tag.id}`}
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  友だち一覧
-                </a>
-                <button
-                  onClick={() => handleDelete(tag.id, tag.name)}
-                  className="text-xs text-red-400 hover:text-red-600 ml-auto opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  削除
-                </button>
-              </div>
+              {editingId === tag.id ? (
+                <div className="flex gap-2">
+                  <button onClick={() => handleSaveEdit(tag.id)} disabled={editSaving} className="text-xs px-2 py-1 text-white rounded disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>
+                    {editSaving ? '保存中' : '保存'}
+                  </button>
+                  <button onClick={() => setEditingId(null)} className="text-xs px-2 py-1 text-gray-600 bg-gray-100 rounded">キャンセル</button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-bold text-gray-900">
+                      {tagCounts[tag.id] ?? '—'}
+                    </span>
+                    <span className="text-xs text-gray-400">人</span>
+                  </div>
+                  <div className="flex gap-2 mt-1">
+                    <a href={`/friends?tagId=${tag.id}`} className="text-xs text-blue-600 hover:underline">友だち一覧</a>
+                    <button onClick={() => handleEdit(tag)} className="text-xs text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">編集</button>
+                    <button onClick={() => handleDelete(tag.id, tag.name)} className="text-xs text-red-400 hover:text-red-600 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">削除</button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>

@@ -103,6 +103,8 @@ export const api = {
         '/api/tags' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
         { method: 'POST', body: JSON.stringify(data) }
       ),
+    update: (id: string, data: { name?: string; color?: string }) =>
+      fetchApi<ApiResponse<Tag>>(`/api/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/tags/${id}`, { method: 'DELETE' }),
   },

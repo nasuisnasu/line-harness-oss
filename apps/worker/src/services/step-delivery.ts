@@ -4,9 +4,10 @@ import {
   advanceFriendScenario,
   completeFriendScenario,
   getFriendById,
+  getLineAccountById,
   jstNow,
 } from '@line-crm/db';
-import type { LineClient } from '@line-crm/line-sdk';
+import { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { jitterDeliveryTime, addJitter, sleep } from './stealth.js';
 
@@ -99,10 +100,17 @@ async function processSingleDelivery(
     return;
   }
 
+  // Use per-account LINE client if friend belongs to a specific account
+  let client = lineClient;
+  if (friend.line_account_id) {
+    const account = await getLineAccountById(db, friend.line_account_id);
+    if (account) client = new LineClient(account.channel_access_token);
+  }
+
   // Build and send the message (with variable substitution)
   const content = applyVars(currentStep.message_content, { name: friend.display_name ?? '' });
   const message = buildMessage(currentStep.message_type, content);
-  await lineClient.pushMessage(friend.line_user_id, [message]);
+  await client.pushMessage(friend.line_user_id, [message]);
 
   // Log outgoing message
   const logId = crypto.randomUUID();

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getTags, createTag, deleteTag } from '@line-crm/db';
+import { getTags, createTag, deleteTag, updateTag } from '@line-crm/db';
 import type { Tag as DbTag } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -45,6 +45,20 @@ tags.post('/api/tags', async (c) => {
     return c.json({ success: true, data: serializeTag(tag) }, 201);
   } catch (err) {
     console.error('POST /api/tags error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// PUT /api/tags/:id - update tag
+tags.put('/api/tags/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json<{ name?: string; color?: string }>();
+    const tag = await updateTag(c.env.DB, id, body);
+    if (!tag) return c.json({ success: false, error: 'Not found' }, 404);
+    return c.json({ success: true, data: serializeTag(tag) });
+  } catch (err) {
+    console.error('PUT /api/tags/:id error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

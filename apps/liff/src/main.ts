@@ -133,8 +133,8 @@ function showCompletion(profile: { displayName: string; pictureUrl?: string }, i
         <p class="name">${escapeHtml(profile.displayName)} さん</p>
       </div>
       <p class="message">
-        セミナーお申し込みありがとうございます！<br>
-        このまましばらくお待ちください😊
+        登録完了！<br>
+        あと5秒で画面が切り替わります...
       </p>
     </div>
   `;
@@ -146,7 +146,7 @@ function showCompletion(profile: { displayName: string; pictureUrl?: string }, i
         liff.openWindow({ url: `https://line.me/ti/p/${BOT_BASIC_ID}`, external: false });
       } catch { /* ignore */ }
       try { liff.closeWindow(); } catch { /* ignore */ }
-    }, 1500);
+    }, 5000);
   }
 }
 
