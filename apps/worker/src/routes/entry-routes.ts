@@ -10,13 +10,14 @@ import type { Env } from '../index.js';
 
 const entryRoutes = new Hono<Env>();
 
-function serialize(row: EntryRoute) {
+function serialize(row: EntryRoute & { line_account_id?: string | null }) {
   return {
     id: row.id,
     refCode: row.ref_code,
     name: row.name,
     tagId: row.tag_id,
     scenarioId: row.scenario_id,
+    lineAccountId: row.line_account_id ?? null,
     redirectUrl: row.redirect_url,
     isActive: Boolean(row.is_active),
     createdAt: row.created_at,
@@ -33,9 +34,8 @@ entryRoutes.get('/api/entry-routes', async (c) => {
     const query = lineAccountId
       ? `SELECT er.*, COUNT(DISTINCT rt.friend_id) as count
          FROM entry_routes er
-         LEFT JOIN tags t ON er.tag_id = t.id
          LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
-         WHERE t.line_account_id = ?
+         WHERE er.line_account_id = ?
          GROUP BY er.id
          ORDER BY er.created_at DESC`
       : `SELECT er.*, COUNT(DISTINCT rt.friend_id) as count

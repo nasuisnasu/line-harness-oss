@@ -36,7 +36,11 @@ const _stateParams = new URLSearchParams(_liffState.startsWith('?') ? _liffState
 const LIFF_ID = _stateParams.get('liffId') || _rawParams.get('liffId') || import.meta.env?.VITE_LIFF_ID || '';
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 const UUID_STORAGE_KEY = 'lh_uuid';
-const BOT_BASIC_ID = _stateParams.get('botId') || _rawParams.get('botId') || import.meta.env?.VITE_BOT_BASIC_ID || '';
+const _LIFF_BOT_MAP: Record<string, string> = {
+  '2009821004-brTkmVVK': '@513qujqi',
+  '2006855304-UfNPHFOn': '@893nrbyp',
+};
+const BOT_BASIC_ID = _stateParams.get('botId') || _rawParams.get('botId') || _LIFF_BOT_MAP[LIFF_ID] || import.meta.env?.VITE_BOT_BASIC_ID || '';
 
 function apiCall(path: string, options?: RequestInit): Promise<Response> {
   return fetch(`${API_URL}${path}`, {
@@ -187,6 +191,7 @@ async function linkAndAddFlow() {
         existingUuid: existingUuid,
         ref: ref,
         alreadyFriend: friendship.friendFlag,
+        liffId: LIFF_ID,
       }),
     }).then(async (res) => {
       if (res.ok) {

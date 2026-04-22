@@ -316,18 +316,22 @@ liffRoutes.post('/api/liff/link', async (c) => {
       displayName?: string | null;
       ref?: string | null;
       alreadyFriend?: boolean;
+      liffId?: string | null;
     }>();
 
     if (!body.idToken) {
       return c.json({ success: false, error: 'idToken is required' }, 400);
     }
 
+    // Extract channel ID from LIFF ID (e.g. "2006855304-UfNPHFOn" → "2006855304")
+    const channelId = body.liffId ? body.liffId.split('-')[0] : c.env.LINE_CHANNEL_ID;
+
     const verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         id_token: body.idToken,
-        client_id: c.env.LINE_CHANNEL_ID,
+        client_id: channelId,
       }),
     });
 

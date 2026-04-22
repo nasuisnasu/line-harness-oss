@@ -11,6 +11,7 @@ interface EntryRoute {
   name: string
   tagId: string | null
   scenarioId: string | null
+  lineAccountId?: string | null
   isActive: boolean
   createdAt: string
   count: number
@@ -116,10 +117,11 @@ export default function EntryRoutesPage() {
     'd49a3a13-8169-4b25-a669-3c8a4f4f964d': { liffId: '2009821004-brTkmVVK', botId: '@513qujqi' },
     '40adcb23-277b-4d9d-b6e2-92fde47d31fb': { liffId: '2006855304-UfNPHFOn', botId: '@893nrbyp' },
   }
-  const accountMeta = selectedAccount ? liffIdMap[selectedAccount.id] : null
-  const liffId = accountMeta?.liffId ?? '2009821004-brTkmVVK'
-  const botId = accountMeta?.botId ?? '@513qujqi'
-  const baseUrl = `https://line.me/R/app/${liffId}`
+  // Get LIFF meta for a specific route (uses route's own line_account_id, falls back to selected account)
+  const getRouteMeta = (r: EntryRoute) => {
+    const accountId = r.lineAccountId ?? selectedAccount?.id ?? ''
+    return liffIdMap[accountId] ?? liffIdMap['d49a3a13-8169-4b25-a669-3c8a4f4f964d']
+  }
 
   return (
     <div>
@@ -199,13 +201,8 @@ export default function EntryRoutesPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-500 font-mono truncate">{baseUrl}?liff.state={encodeURIComponent(`?liffId=${liffId}&botId=${botId}&ref=${r.refCode}`)}</span>
-                      <button
-                        onClick={() => copyUrl(`${baseUrl}?liff.state=${encodeURIComponent(`?liffId=${liffId}&botId=${botId}&ref=${r.refCode}`)}`, r.id)}
-                        className="flex-shrink-0 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
-                      >
-                        {copied === r.id ? 'コピー済' : 'コピー'}
-                      </button>
+                      {(() => { const m = getRouteMeta(r); const url = `https://line.me/R/app/${m.liffId}?liff.state=${encodeURIComponent(`?liffId=${m.liffId}&botId=${m.botId}&ref=${r.refCode}`)}`; return (<><span className="text-xs text-gray-500 font-mono truncate">{url}</span><button onClick={() => copyUrl(url, r.id)}
+                        className="flex-shrink-0 text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors">{copied === r.id ? 'コピー済' : 'コピー'}</button></>) })()}
                     </div>
                   </div>
                   <div className="mx-4 text-right flex-shrink-0">
