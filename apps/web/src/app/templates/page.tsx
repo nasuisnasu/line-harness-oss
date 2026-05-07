@@ -22,6 +22,13 @@ const messageTypeLabels: Record<string, string> = {
   flex: 'Flex',
 }
 
+// LIFF mapping for "リンク取得" — clicking the resulting URL pushes the
+// template to the friend via /api/liff/send-template. Add new accounts here.
+const liffIdMap: Record<string, string> = {
+  'd49a3a13-8169-4b25-a669-3c8a4f4f964d': '2009821004-brTkmVVK',
+  '40adcb23-277b-4d9d-b6e2-92fde47d31fb': '2006855304-UfNPHFOn',
+}
+
 interface CreateFormState {
   name: string
   category: string
@@ -73,6 +80,7 @@ export default function TemplatesPage() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const { selectedAccount } = useAccount()
+  const liffId = selectedAccount ? liffIdMap[selectedAccount.id] ?? null : null
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -147,6 +155,20 @@ export default function TemplatesPage() {
       load()
     } catch {
       setError('削除に失敗しました')
+    }
+  }
+
+  const handleCopyLink = async (id: string) => {
+    if (!liffId) {
+      alert('このアカウントにはLIFFが設定されていません。左上でLIFFが紐付いたアカウントを選んでください。')
+      return
+    }
+    const url = `https://liff.line.me/${liffId}?page=send-template&id=${id}`
+    try {
+      await navigator.clipboard.writeText(url)
+      alert(`リンクをコピーしました\n${url}`)
+    } catch {
+      window.prompt('リンクをコピーしてください', url)
     }
   }
 
@@ -345,12 +367,22 @@ export default function TemplatesPage() {
 
                   {/* Actions */}
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleDelete(template.id)}
-                      className="px-3 py-1 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-                    >
-                      削除
-                    </button>
+                    <div className="inline-flex gap-1">
+                      <button
+                        onClick={() => handleCopyLink(template.id)}
+                        disabled={!liffId}
+                        title={liffId ? '特典PDF等に貼るLIFFリンクをコピー' : 'このアカウントにはLIFFが未設定'}
+                        className="px-3 py-1 text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        リンク取得
+                      </button>
+                      <button
+                        onClick={() => handleDelete(template.id)}
+                        className="px-3 py-1 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+                      >
+                        削除
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
