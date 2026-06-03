@@ -26,6 +26,8 @@ export interface Friend {
    * D1はBOOLEANをINTEGER(0/1)で格納するが、Cloudflare D1クライアントはJavaScript boolean に変換して返す
    */
   isFollowing: boolean;
+  /** 配信除外フラグ */
+  isBlocked: boolean;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
   /** 更新日時 (ISO 8601) */
@@ -42,6 +44,8 @@ export interface Tag {
   name: string;
   /** 表示色 (HEX: #RRGGBB) */
   color: string;
+  /** グループ名（用途別の任意の分類ラベル）。NULL = 未分類 */
+  groupName?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }
@@ -80,6 +84,10 @@ export interface Scenario {
   isActive: boolean;
   /** LINEアカウントID */
   lineAccountId?: string | null;
+  /** 任意のグループラベル（UI bucketing 用、null = 未分類） */
+  groupName?: string | null;
+  /** 完了時に自動エンロールする次シナリオ。null = 連鎖なし */
+  nextScenarioId?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
   /** 更新日時 (ISO 8601) */
@@ -91,7 +99,7 @@ export interface Scenario {
 // -----------------------------------------------------------------------------
 
 /** メッセージ種別 */
-export type MessageType = "text" | "image" | "flex";
+export type MessageType = "text" | "image" | "flex" | "richmenu" | "buttons";
 
 export interface ScenarioStep {
   /** 主キー (UUIDv4) */
@@ -100,8 +108,20 @@ export interface ScenarioStep {
   scenarioId: string;
   /** ステップ順序 (1始まり) */
   stepOrder: number;
-  /** 前のステップからの遅延時間 (分) */
+  /** 前のステップからの遅延時間 (分) — 'relative' モード用 */
   delayMinutes: number;
+  /** 配信タイミングのモード:
+   *   'relative'      → delayMinutes を使用（既存挙動）
+   *   'days_at_time'  → delayDays + delayTime (HH:MM JST) を使用
+   *   'absolute'      → delayAt（指定の日時、JST）を使用
+   */
+  delayMode?: 'relative' | 'days_at_time' | 'absolute';
+  /** 'days_at_time' モード時、エンロールから何日後か */
+  delayDays?: number | null;
+  /** 'days_at_time' モード時、配信時刻（JST、HH:MM） */
+  delayTime?: string | null;
+  /** 'absolute' モード時、配信日時（JST、`YYYY-MM-DDTHH:MM`） */
+  delayAt?: string | null;
   /** メッセージ種別 */
   messageType: MessageType;
   /** メッセージ内容 (テキスト or JSONシリアライズ済みFlexメッセージ等) */
@@ -112,6 +132,10 @@ export interface ScenarioStep {
   conditionValue: string | null;
   /** 条件不成立時のジャンプ先ステップ順序 */
   nextStepOnFalse?: number | null;
+  /** リッチメニュー切り替えステップで使う、対象リッチメニューID */
+  richMenuId?: string | null;
+  /** このステップの内容を流し込んだ元テンプレートID（編集UIの復元用） */
+  templateId?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }
@@ -149,6 +173,9 @@ export interface FriendScenario {
 /** 配信対象種別 */
 export type BroadcastTargetType = "all" | "tag";
 
+/** タグ条件モード ('include': 該当する人に配信 / 'exclude': 該当する人を除外) */
+export type BroadcastTargetTagMode = "include" | "exclude";
+
 /** 配信ステータス */
 export type BroadcastStatus = "draft" | "scheduled" | "sending" | "sent";
 
@@ -161,10 +188,16 @@ export interface Broadcast {
   messageType: MessageType;
   /** メッセージ内容 */
   messageContent: string;
+  /** マルチメッセージ配信時の各メッセージ（最大5件）。設定されているとmessageType/messageContentより優先される */
+  messages?: { type: string; content: string }[] | null;
   /** 配信対象種別 */
   targetType: BroadcastTargetType;
   /** 対象タグID (targetType が 'tag' の場合のみ使用) */
   targetTagId: string | null;
+  /** タグ条件モード (targetType が 'tag' の場合のみ使用) */
+  targetTagMode: BroadcastTargetTagMode;
+  /** 複合タグフィルタ: { include: [...], exclude: [...] }。設定されていると targetTagId / targetTagMode より優先される */
+  targetTagFilter?: { include: string[]; exclude: string[] } | null;
   /** 配信ステータス */
   status: BroadcastStatus;
   /** 予約配信日時 (ISO 8601、即時配信の場合は null) */
@@ -175,6 +208,10 @@ export interface Broadcast {
   totalCount: number;
   /** 配信成功人数 */
   successCount: number;
+  /** グループ名（管理画面でのカテゴリ分け用） */
+  groupName?: string | null;
+  /** 紐付けられたLINE OAアカウントID */
+  lineAccountId?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }
