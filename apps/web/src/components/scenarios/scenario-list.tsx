@@ -14,9 +14,14 @@ interface ScenarioListProps {
   onToggleActive: (id: string, current: boolean) => void
   onDelete: (id: string) => void
   loading?: boolean
+  /** When set, each card renders an inline group selector that calls this
+   *  with the picked label. The picker exposes existing groups + a "新規"
+   *  option so an operator can categorise without leaving the list view. */
+  onUpdateGroup?: (id: string, groupName: string | null) => void
+  existingGroups?: string[]
 }
 
-export default function ScenarioList({ scenarios, onToggleActive, onDelete, loading }: ScenarioListProps) {
+export default function ScenarioList({ scenarios, onToggleActive, onDelete, loading, onUpdateGroup, existingGroups = [] }: ScenarioListProps) {
   if (scenarios.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
@@ -51,6 +56,34 @@ export default function ScenarioList({ scenarios, onToggleActive, onDelete, load
           {/* Description */}
           {scenario.description && (
             <p className="text-xs text-gray-500 line-clamp-2">{scenario.description}</p>
+          )}
+
+          {/* Inline group setter — visible whenever the parent passes the
+              callback. Surface for the operator to categorise scenarios
+              without diving into the detail page. */}
+          {onUpdateGroup && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-400">グループ:</span>
+              <select
+                value={scenario.groupName ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (v === '__new__') {
+                    const name = window.prompt('新しいグループ名を入力')?.trim()
+                    if (name) onUpdateGroup(scenario.id, name)
+                    return
+                  }
+                  onUpdateGroup(scenario.id, v || null)
+                }}
+                className="text-[11px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-700"
+              >
+                <option value="">未分類</option>
+                {existingGroups.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+                <option value="__new__">+ 新規グループを作成…</option>
+              </select>
+            </div>
           )}
 
           {/* Metadata */}

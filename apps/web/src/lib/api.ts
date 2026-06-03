@@ -77,6 +77,12 @@ export const api = {
       fetchApi<ApiResponse<{ count: number }>>(
         '/api/friends/count' + (params ? '?' + new URLSearchParams(params as Record<string, string>) : '')
       ),
+    dailyStats: (params?: { lineAccountId?: string; days?: number }) =>
+      fetchApi<ApiResponse<{ date: string; added: number; blocked: number; cumulative: number }[]>>(
+        '/api/friends/daily-stats' + (params ? '?' + new URLSearchParams(
+          Object.fromEntries(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
+        ) : '')
+      ),
     addTag: (friendId: string, tagId: string) =>
       fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/tags`, {
         method: 'POST',
@@ -92,23 +98,68 @@ export const api = {
         status: string; currentStepOrder: number; startedAt: string; nextDeliveryAt: string | null;
         steps: { stepOrder: number; messageType: string; messageContent: string; delayMinutes: number; sent: boolean }[];
       }[]>>(`/api/friends/${friendId}/scenarios`),
+    block: (friendId: string, isBlocked: boolean) =>
+      fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/block`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isBlocked }),
+      }),
+    linkClicks: (friendId: string) =>
+      fetchApi<ApiResponse<{ trackedLinkId: string; clickedAt: string; linkName: string | null }[]>>(
+        `/api/friends/${friendId}/link-clicks`,
+      ),
+    bookings: (friendId: string) =>
+      fetchApi<ApiResponse<{
+        id: string; title: string; startAt: string; endAt: string;
+        status: string; appEventId: string | null; eventName: string | null;
+      }[]>>(`/api/friends/${friendId}/bookings`),
+    payments: {
+      list: (friendId: string) =>
+        fetchApi<ApiResponse<{
+          payments: { id: string; amount: number; note: string | null; paidAt: string; createdAt: string }[];
+          total: number;
+        }>>(`/api/friends/${friendId}/payments`),
+      add: (friendId: string, data: { amount: number; note?: string; paidAt: string }) =>
+        fetchApi<ApiResponse<{ id: string }>>(`/api/friends/${friendId}/payments`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      update: (friendId: string, paymentId: string, data: { amount?: number; note?: string | null; paidAt?: string }) =>
+        fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/payments/${paymentId}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      delete: (friendId: string, paymentId: string) =>
+        fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/payments/${paymentId}`, {
+          method: 'DELETE',
+        }),
+    },
   },
   tags: {
+    /** Always pass `{ lineAccountId: selectedAccount.id }` from `useAccount()`.
+     *  Omitting it returns tags across every LINE OA and operators end up
+     *  picking another account's tag from a UI selector. */
     list: (params?: { lineAccountId?: string }) =>
       fetchApi<ApiResponse<Tag[]>>(
         '/api/tags' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')
       ),
-    create: (data: { name: string; color: string }, params?: { lineAccountId?: string }) =>
+    create: (data: { name: string; color: string; groupName?: string | null }, params?: { lineAccountId?: string }) =>
       fetchApi<ApiResponse<Tag>>(
         '/api/tags' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
         { method: 'POST', body: JSON.stringify(data) }
       ),
-    update: (id: string, data: { name?: string; color?: string }) =>
+    update: (id: string, data: { name?: string; color?: string; groupName?: string | null }) =>
       fetchApi<ApiResponse<Tag>>(`/api/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/tags/${id}`, { method: 'DELETE' }),
+    renameGroup: (from: string, to: string | null) =>
+      fetchApi<ApiResponse<{ changes: number }>>(`/api/tags/groups/rename`, {
+        method: 'POST',
+        body: JSON.stringify({ from, to }),
+      }),
   },
   scenarios: {
+    /** Always pass `{ lineAccountId: selectedAccount.id }` — see tags.list. */
     list: (params?: { lineAccountId?: string }) =>
       fetchApi<ApiResponse<(Scenario & { stepCount?: number })[]>>(
         '/api/scenarios' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')
@@ -145,6 +196,19 @@ export const api = {
       fetchApi<ApiResponse<null>>(`/api/scenarios/${id}/steps/${stepId}`, {
         method: 'DELETE',
       }),
+    testAll: (id: string) =>
+      fetchApi<ApiResponse<{ sentTo: string; sentCount: number }>>(`/api/scenarios/${id}/test`, {
+        method: 'POST',
+      }),
+    testStep: (id: string, stepId: string) =>
+      fetchApi<ApiResponse<{ sentTo: string; sentCount: number }>>(`/api/scenarios/${id}/steps/${stepId}/test`, {
+        method: 'POST',
+      }),
+    renameGroup: (from: string, to: string | null) =>
+      fetchApi<ApiResponse<{ changes: number }>>(`/api/scenarios/groups/rename`, {
+        method: 'POST',
+        body: JSON.stringify({ from, to }),
+      }),
   },
   broadcasts: {
     list: (params?: { lineAccountId?: string }) =>
@@ -153,28 +217,43 @@ export const api = {
       ),
     get: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),
+    audience: (id: string) =>
+      fetchApi<ApiResponse<{ count: number; sample: { id: string; displayName: string | null }[] }>>(
+        `/api/broadcasts/${id}/audience`,
+      ),
     create: (data: {
       title: string
       messageType: ApiBroadcast['messageType']
       messageContent: string
+      messages?: { type: string; content: string }[]
       targetType: ApiBroadcast['targetType']
       targetTagId?: string | null
+      targetTagMode?: ApiBroadcast['targetTagMode']
+      targetTagFilter?: { include: string[]; exclude: string[] } | null
       scheduledAt?: string | null
       status?: ApiBroadcast['status']
-    }) =>
-      fetchApi<ApiResponse<ApiBroadcast>>('/api/broadcasts', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+      groupName?: string | null
+    }, params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(
+        '/api/broadcasts' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }
+      ),
     update: (
       id: string,
       data: {
         title?: string
         messageType?: ApiBroadcast['messageType']
         messageContent?: string
+        messages?: { type: string; content: string }[]
         targetType?: ApiBroadcast['targetType']
         targetTagId?: string | null
+        targetTagMode?: ApiBroadcast['targetTagMode']
+        targetTagFilter?: { include: string[]; exclude: string[] } | null
         scheduledAt?: string | null
+        groupName?: string | null
       }
     ) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`, {
@@ -185,6 +264,16 @@ export const api = {
       fetchApi<ApiResponse<null>>(`/api/broadcasts/${id}`, { method: 'DELETE' }),
     send: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/send`, { method: 'POST' }),
+    test: (data: {
+      lineAccountId: string
+      messageType?: ApiBroadcast['messageType']
+      messageContent?: string
+      messages?: { type: string; content: string }[]
+    }) =>
+      fetchApi<ApiResponse<{ sentTo: string }>>('/api/broadcasts/test', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
 
   // ── Round 2 APIs ─────────────────────────────────────────────────────────
@@ -296,6 +385,159 @@ export const api = {
       ),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/templates/${id}`, { method: 'DELETE' }),
+    testSend: (id: string, lineAccountId: string) =>
+      fetchApi<ApiResponse<{ sentTo: string }>>(`/api/templates/${id}/test-send`, {
+        method: 'POST',
+        body: JSON.stringify({ lineAccountId }),
+      }),
+  },
+  events: {
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<EventItem[]>>(
+        '/api/events' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+      ),
+    get: (id: string) =>
+      fetchApi<ApiResponse<EventItem & { consultationConfig: ConsultationConfig | null }>>(`/api/events/${id}`),
+    create: (
+      data: {
+        name: string
+        description?: string | null
+        eventType: 'consultation' | 'seminar'
+        slug: string
+        isActive?: boolean
+      },
+      params?: { lineAccountId?: string },
+    ) =>
+      fetchApi<ApiResponse<EventItem>>(
+        '/api/events' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+        { method: 'POST', body: JSON.stringify(data) },
+      ),
+    update: (
+      id: string,
+      data: Partial<{
+        name: string
+        description: string | null
+        slug: string
+        isActive: boolean
+        consultationConfig: Partial<ConsultationConfig>
+      }>,
+    ) =>
+      fetchApi<ApiResponse<EventItem & { consultationConfig: ConsultationConfig | null }>>(
+        `/api/events/${id}`,
+        { method: 'PUT', body: JSON.stringify(data) },
+      ),
+    delete: (id: string) => fetchApi<ApiResponse<null>>(`/api/events/${id}`, { method: 'DELETE' }),
+    bookings: (id: string) =>
+      fetchApi<ApiResponse<EventBookingItem[]>>(`/api/events/${id}/bookings`),
+    cancelBooking: (bookingId: string) =>
+      fetchApi<ApiResponse<{ id: string; status: string }>>(`/api/event-bookings/${bookingId}/cancel`, {
+        method: 'POST',
+      }),
+  },
+  googleCalendar: {
+    list: () =>
+      fetchApi<ApiResponse<{ id: string; calendarId: string; authType: string; isActive: boolean; createdAt: string }[]>>(
+        '/api/integrations/google-calendar',
+      ),
+    connect: (data: { calendarId: string; authType: 'access_token' | 'api_key' | 'service_account'; accessToken?: string; refreshToken?: string; apiKey?: string }) =>
+      fetchApi<ApiResponse<{ id: string; calendarId: string; authType: string; isActive: boolean; createdAt: string }>>(
+        '/api/integrations/google-calendar/connect',
+        { method: 'POST', body: JSON.stringify(data) },
+      ),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/integrations/google-calendar/${id}`, { method: 'DELETE' }),
+  },
+  autoReplies: {
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<AutoReplyItem[]>>(
+        '/api/auto-replies' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+      ),
+    create: (
+      data: {
+        keyword: string
+        matchType: 'exact' | 'contains'
+        responseType: 'text' | 'template' | 'add_tag' | 'enroll_scenario'
+        responseContent: string
+        isActive?: boolean
+      },
+      params?: { lineAccountId?: string },
+    ) =>
+      fetchApi<ApiResponse<AutoReplyItem>>(
+        '/api/auto-replies' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+        { method: 'POST', body: JSON.stringify(data) },
+      ),
+    update: (
+      id: string,
+      data: Partial<{
+        keyword: string
+        matchType: 'exact' | 'contains'
+        responseType: string
+        responseContent: string
+        isActive: boolean
+      }>,
+    ) =>
+      fetchApi<ApiResponse<AutoReplyItem>>(`/api/auto-replies/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/auto-replies/${id}`, { method: 'DELETE' }),
+  },
+  actions: {
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<BulkActionItem[]>>(
+        '/api/actions' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+      ),
+    create: (data: {
+      lineAccountId: string
+      name: string
+      actionType: 'enroll_scenario' | 'add_tag' | 'set_richmenu'
+      actionPayload: { scenarioId?: string; tagId?: string; richMenuId?: string }
+      targetSpec: { mode: 'all' | 'tag_include' | 'tag_exclude'; tagId?: string | null }
+    }) =>
+      fetchApi<ApiResponse<{ id: string; totalTargets: number; processed: number; failed: number; status: string }>>(
+        '/api/actions',
+        { method: 'POST', body: JSON.stringify(data) },
+      ),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/actions/${id}`, { method: 'DELETE' }),
+  },
+  uploads: {
+    image: async (file: File) => {
+      const fd = new FormData()
+      fd.append('image', file)
+      // fetchApi sets Content-Type: application/json; for multipart we need
+      // raw fetch so the browser attaches its own multipart boundary.
+      const res = await fetch(`${API_URL}/api/uploads/image`, {
+        method: 'POST',
+        headers: { 'X-API-Key': getApiKey() },
+        body: fd,
+      })
+      const json = (await res.json()) as ApiResponse<{ key: string; url: string }>
+      return json
+    },
+    file: async (file: File, lineAccountId?: string | null) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      if (lineAccountId) fd.append('lineAccountId', lineAccountId)
+      const res = await fetch(`${API_URL}/api/uploads/file`, {
+        method: 'POST',
+        headers: { 'X-API-Key': getApiKey() },
+        body: fd,
+      })
+      const json = (await res.json()) as ApiResponse<{ id: string; key: string; url: string }>
+      return json
+    },
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<{
+        id: string; lineAccountId: string | null; filename: string;
+        originalName: string | null; size: number | null;
+        contentType: string | null; createdAt: string; url: string;
+      }[]>>(
+        '/api/uploads/files' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+      ),
+    deleteFile: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/uploads/files/${id}`, { method: 'DELETE' }),
   },
   automations: {
     list: () =>
@@ -459,13 +701,18 @@ export const api = {
       ),
   },
   entryRoutes: {
-    list: (params?: { lineAccountId?: string }) => fetchApi<{ success: boolean; data: { id: string; refCode: string; name: string; tagId: string | null; scenarioId: string | null; isActive: boolean; createdAt: string; count: number }[] }>('/api/entry-routes' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')),
-    create: (data: { refCode: string; name: string; tagId?: string | null; scenarioId?: string | null; lineAccountId?: string | null }) =>
+    list: (params?: { lineAccountId?: string }) => fetchApi<{ success: boolean; data: { id: string; refCode: string; name: string; tagId: string | null; tagIds: string[]; scenarioId: string | null; lineAccountId: string | null; isActive: boolean; groupName: string | null; createdAt: string; count: number; totalRevenue: number }[] }>('/api/entry-routes' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')),
+    create: (data: { refCode?: string; name: string; tagId?: string | null; tagIds?: string[]; scenarioId?: string | null; lineAccountId?: string | null; groupName?: string | null }) =>
       fetchApi<{ success: boolean; data: unknown }>('/api/entry-routes', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: { name?: string; tagId?: string | null; scenarioId?: string | null }) =>
+    update: (id: string, data: { name?: string; tagId?: string | null; tagIds?: string[]; scenarioId?: string | null; groupName?: string | null }) =>
       fetchApi<{ success: boolean; data: unknown }>(`/api/entry-routes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       fetchApi<{ success: boolean; data: null }>(`/api/entry-routes/${id}`, { method: 'DELETE' }),
+    renameGroup: (from: string, to: string | null) =>
+      fetchApi<{ success: boolean; data: { changes: number } }>(`/api/entry-routes/groups/rename`, {
+        method: 'POST',
+        body: JSON.stringify({ from, to }),
+      }),
   },
   health: {
     accounts: () =>
@@ -484,4 +731,301 @@ export const api = {
     getMigration: (migrationId: string) =>
       fetchApi<ApiResponse<AccountMigration>>(`/api/accounts/migrations/${migrationId}`),
   },
+  richMenus: {
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<RichMenuItem[]>>(
+        '/api/rich-menus' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : '')
+      ),
+    get: (id: string) =>
+      fetchApi<ApiResponse<RichMenuItem>>(`/api/rich-menus/${id}`),
+    create: (data: {
+      lineAccountId: string
+      name: string
+      sizeType: 'full' | 'compact'
+      chatBarText: string
+      selected?: boolean
+      areas: RichMenuAreaItem[]
+      isDefault?: boolean
+      showOnFriendAdd?: boolean
+    }) =>
+      fetchApi<ApiResponse<RichMenuItem>>('/api/rich-menus', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: {
+      name?: string
+      sizeType?: 'full' | 'compact'
+      chatBarText?: string
+      selected?: boolean
+      areas?: RichMenuAreaItem[]
+    }) =>
+      fetchApi<ApiResponse<RichMenuItem>>(`/api/rich-menus/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/rich-menus/${id}`, { method: 'DELETE' }),
+    publish: async (id: string, imageFile: File): Promise<ApiResponse<RichMenuItem>> => {
+      const formData = new FormData()
+      formData.append('image', imageFile)
+      // Use the shared helper so we read the same `lh_api_key` localStorage entry
+      // as every other endpoint. This used to read `apiKey` (different name)
+      // which produced 401 / "Unauthorized" right after login.
+      const res = await fetch(`${API_URL}/api/rich-menus/${id}/publish`, {
+        method: 'POST',
+        headers: { 'X-API-Key': getApiKey() },
+        body: formData,
+      })
+      return res.json()
+    },
+    setDefault: (id: string) =>
+      fetchApi<ApiResponse<RichMenuItem>>(`/api/rich-menus/${id}/set-default`, { method: 'POST' }),
+    setFriendAdd: (id: string) =>
+      fetchApi<ApiResponse<RichMenuItem>>(`/api/rich-menus/${id}/set-friend-add`, { method: 'POST' }),
+    assignToFriend: (friendId: string, richMenuRecordId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/rich-menu`, {
+        method: 'POST',
+        body: JSON.stringify({ richMenuId: richMenuRecordId }),
+      }),
+    unlinkFromFriend: (friendId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/rich-menu`, { method: 'DELETE' }),
+    imageUrl: (id: string) => {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
+      const apiKey = (typeof window !== 'undefined' ? localStorage.getItem('apiKey') : null) ?? process.env.NEXT_PUBLIC_API_KEY ?? ''
+      return `${apiUrl}/api/rich-menus/${id}/image?apiKey=${encodeURIComponent(apiKey)}`
+    },
+  },
+  forms: {
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<FormItem[]>>(
+        '/api/forms' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+      ),
+    get: (id: string) => fetchApi<ApiResponse<FormItem>>(`/api/forms/${id}`),
+    create: (data: {
+      name: string
+      displayName?: string | null
+      description?: string | null
+      fields: FormFieldItem[]
+      onSubmitTagId?: string | null
+      onSubmitScenarioId?: string | null
+      submitLabel?: string | null
+      saveToMetadata?: boolean
+      isActive?: boolean
+      formType?: 'generic' | 'daily_report' | 'test'
+      correctAnswers?: Record<string, string | string[]> | null
+      passingScore?: number | null
+      passTagId?: string | null
+      failTagId?: string | null
+    }) => fetchApi<ApiResponse<FormItem>>('/api/forms', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    update: (id: string, data: {
+      name?: string
+      displayName?: string | null
+      description?: string | null
+      fields?: FormFieldItem[]
+      onSubmitTagId?: string | null
+      onSubmitScenarioId?: string | null
+      submitLabel?: string | null
+      saveToMetadata?: boolean
+      isActive?: boolean
+      formType?: 'generic' | 'daily_report' | 'test'
+      correctAnswers?: Record<string, string | string[]> | null
+      passingScore?: number | null
+      passTagId?: string | null
+      failTagId?: string | null
+    }) => fetchApi<ApiResponse<FormItem>>(`/api/forms/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/forms/${id}`, { method: 'DELETE' }),
+    submissions: (id: string) =>
+      fetchApi<ApiResponse<FormSubmissionItem[]>>(`/api/forms/${id}/submissions`),
+  },
+  trackedLinks: {
+    list: (params?: { lineAccountId?: string }) =>
+      fetchApi<ApiResponse<TrackedLinkItem[]>>(
+        '/api/tracked-links' + (params?.lineAccountId ? '?lineAccountId=' + params.lineAccountId : ''),
+      ),
+    get: (id: string) => fetchApi<ApiResponse<TrackedLinkDetail>>(`/api/tracked-links/${id}`),
+    create: (data: { name: string; originalUrl: string; tagId?: string | null; scenarioId?: string | null; lineAccountId?: string | null }) =>
+      fetchApi<ApiResponse<TrackedLinkItem>>('/api/tracked-links', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: { name?: string; originalUrl?: string; tagId?: string | null; scenarioId?: string | null; isActive?: boolean; lineAccountId?: string | null }) =>
+      fetchApi<ApiResponse<TrackedLinkItem>>(`/api/tracked-links/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/tracked-links/${id}`, { method: 'DELETE' }),
+  },
+}
+
+export interface FormFieldItem {
+  name: string
+  label: string
+  type: 'text' | 'textarea' | 'radio' | 'select' | 'checkbox' | 'email' | 'tel' | 'number' | 'date'
+  required?: boolean
+  options?: string[]
+  /** 選択肢の値ごとに付与するタグID配列（複数可） */
+  optionTags?: Record<string, string[]>
+  placeholder?: string
+}
+
+export interface FormItem {
+  id: string
+  name: string
+  /** 回答者に見えるタイトル。null時は管理名 (name) にフォールバック */
+  displayName?: string | null
+  description: string | null
+  fields: FormFieldItem[]
+  onSubmitTagId: string | null
+  onSubmitScenarioId: string | null
+  /** 送信ボタンのCTA文言 */
+  submitLabel?: string | null
+  saveToMetadata: boolean
+  isActive: boolean
+  submitCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FormSubmissionItem {
+  id: string
+  formId: string
+  friendId: string | null
+  friendName?: string | null
+  data: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RichMenuAreaItem {
+  bounds: { x: number; y: number; width: number; height: number }
+  action: {
+    type: 'uri' | 'message' | 'postback' | 'richmenuswitch'
+    label?: string
+    uri?: string
+    text?: string
+    data?: string
+    richMenuAliasId?: string
+  }
+}
+
+export interface RichMenuItem {
+  id: string
+  lineAccountId: string
+  name: string
+  lineRichmenuId: string | null
+  sizeType: 'full' | 'compact'
+  chatBarText: string
+  selected: boolean
+  areas: RichMenuAreaItem[]
+  isDefault: boolean
+  showOnFriendAdd: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TrackedLinkItem {
+  id: string
+  name: string
+  originalUrl: string
+  trackingUrl: string
+  tagId: string | null
+  scenarioId: string | null
+  lineAccountId: string | null
+  isActive: boolean
+  clickCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TrackedLinkDetail extends TrackedLinkItem {
+  clicks: { id: string; friendId: string | null; friendDisplayName: string | null; clickedAt: string }[]
+}
+
+export interface EventItem {
+  id: string
+  lineAccountId: string | null
+  name: string
+  description: string | null
+  eventType: 'consultation' | 'seminar'
+  slug: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConsultationConfig {
+  eventId: string
+  durationMinutes: number
+  bufferBeforeMinutes: number
+  bufferAfterMinutes: number
+  advanceMinHours: number
+  advanceMaxDays: number
+  calendarViewMode: 'week' | 'month'
+  businessHours: Record<string, [string, string] | null>
+  blackoutDates: string[]
+  googleCalendarConnectionId: string | null
+  formId: string | null
+  onCompleteTagId: string | null
+  onCompleteScenarioId: string | null
+  zoomUrl: string | null
+  reminderDayBefore: boolean
+  reminderDayBeforeAt: string
+  reminderHourBefore: boolean
+  reminderHourBeforeMinutes: number
+  reminderDayBeforeMessage?: string | null
+  reminderHourBeforeMessage?: string | null
+  confirmationMessage?: string | null
+  slotIntervalMinutes: number
+  bookingFormFields: FormFieldItem[]
+  bookingFormSubmitLabel?: string | null
+}
+
+export interface EventBookingItem {
+  id: string
+  connectionId: string
+  friendId: string | null
+  friendDisplayName: string | null
+  friendLineUserId: string | null
+  gcalEventId: string | null
+  title: string
+  startAt: string
+  endAt: string
+  status: 'confirmed' | 'cancelled' | 'completed'
+  metadata: Record<string, unknown> | null
+  createdAt: string
+}
+
+export interface AutoReplyItem {
+  id: string
+  lineAccountId: string | null
+  keyword: string
+  matchType: 'exact' | 'contains'
+  responseType: 'text' | 'template' | 'add_tag' | 'enroll_scenario' | 'image' | 'flex'
+  responseContent: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+}
+
+export interface BulkActionItem {
+  id: string
+  lineAccountId: string | null
+  name: string
+  actionType: 'enroll_scenario' | 'add_tag' | 'set_richmenu'
+  actionPayload: { scenarioId?: string; tagId?: string; richMenuId?: string }
+  targetSpec: { mode: 'all' | 'tag_include' | 'tag_exclude'; tagId?: string | null }
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  totalTargets: number
+  processedCount: number
+  failedCount: number
+  errorLog: string | null
+  executedAt: string | null
+  createdAt: string
 }

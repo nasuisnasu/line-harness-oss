@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import FriendInfoPanel from '@/components/friends/friend-info-panel'
 import { useAccount } from '@/lib/account-context'
 
 interface Chat {
@@ -82,6 +83,8 @@ export default function ChatsPage() {
   const [chats, setChats] = useState<Chat[]>([])
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
   const [chatDetail, setChatDetail] = useState<ChatDetail | null>(null)
+  const [infoPanelOpen, setInfoPanelOpen] = useState(false)
+  const [linkClicks, setLinkClicks] = useState<Map<string, string>>(new Map())
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -90,6 +93,7 @@ export default function ChatsPage() {
   const [sending, setSending] = useState(false)
   const [notes, setNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const { selectedAccount } = useAccount()
 
   const loadChats = useCallback(async () => {
@@ -117,8 +121,20 @@ export default function ChatsPage() {
     try {
       const res = await api.chats.get(chatId)
       if (res.success) {
-        setChatDetail(res.data as unknown as ChatDetail)
-        setNotes((res.data as unknown as ChatDetail).notes || '')
+        const detail = res.data as unknown as ChatDetail
+        setChatDetail(detail)
+        setNotes(detail.notes || '')
+        // 友達のリンククリック履歴を取得
+        try {
+          const clicksRes = await api.friends.linkClicks(detail.friendId)
+          if (clicksRes.success) {
+            const map = new Map<string, string>()
+            for (const c of clicksRes.data) {
+              if (!map.has(c.trackedLinkId)) map.set(c.trackedLinkId, c.clickedAt)
+            }
+            setLinkClicks(map)
+          }
+        } catch { /* ignore */ }
       }
     } catch {
       setError('チャット詳細の読み込みに失敗しました。')
@@ -134,6 +150,16 @@ export default function ChatsPage() {
   useEffect(() => {
     loadChats()
   }, [loadChats])
+
+  // Auto-scroll to bottom when chat is opened or new messages arrive
+  useEffect(() => {
+    if (chatDetail?.messages?.length) {
+      // requestAnimationFrame ensures DOM is painted before scrolling
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ block: 'end' })
+      })
+    }
+  }, [chatDetail?.id, chatDetail?.messages?.length])
 
   useEffect(() => {
     if (selectedChatId) {
@@ -154,6 +180,9 @@ export default function ChatsPage() {
     try {
       await api.chats.send(selectedChatId, { content: messageContent.trim() })
       setMessageContent('')
+      // textareaの高さをリセット
+      const ta = document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="メッセージを入力"]')
+      if (ta) ta.style.height = 'auto'
       loadChatDetail(selectedChatId)
       loadChats()
     } catch {
@@ -187,8 +216,9 @@ export default function ChatsPage() {
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Cmd/Ctrl + Enter で送信、Enter単体や Shift+Enter は通常通り改行
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       handleSendMessage()
     }
@@ -351,8 +381,24 @@ export default function ChatsPage() {
                       解決済にする
                     </button>
                   )}
+                  <button
+                    onClick={() => setInfoPanelOpen(!infoPanelOpen)}
+                    className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors flex items-center gap-1"
+                  >
+                    <span>お客様情報</span>
+                    <svg className={`w-3 h-3 transition-transform ${infoPanelOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
                 </div>
               </div>
+
+              {/* お客様情報パネル（折りたたみ） */}
+              {infoPanelOpen && (
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                  <FriendInfoPanel friendId={chatDetail.friendId} compact />
+                </div>
+              )}
 
               {/* Messages — LINE-style chat bubbles */}
               <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
@@ -363,6 +409,11 @@ export default function ChatsPage() {
                 ) : (
                   (chatDetail.messages ?? []).map((msg) => {
                     const isOutgoing = msg.direction === 'outgoing'
+
+                    // 送信メッセージ内のトラッキングリンクを抽出
+                    const trackingLinkIds = isOutgoing
+                      ? Array.from(msg.content.matchAll(/\/t\/([a-zA-Z0-9-]+)(?:\?[^\s]*)?/g)).map(m => m[1])
+                      : []
 
                     // メッセージ表示の分岐
                     let bubbleContent: React.ReactNode
@@ -419,6 +470,23 @@ export default function ChatsPage() {
                           >
                             {bubbleContent}
                           </div>
+                          {/* リンククリック状況 */}
+                          {trackingLinkIds.length > 0 && (
+                            <div className="flex flex-col gap-0.5 mt-1">
+                              {trackingLinkIds.map((lid) => {
+                                const clickedAt = linkClicks.get(lid)
+                                return clickedAt ? (
+                                  <span key={lid} className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                    🔗 クリック済 {new Date(clickedAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                ) : (
+                                  <span key={lid} className="text-xs px-2 py-0.5 rounded-full bg-white/20 text-white/70">
+                                    🔗 未クリック
+                                  </span>
+                                )
+                              })}
+                            </div>
+                          )}
                           {/* 時刻 */}
                           <span className="text-xs text-white/50 mt-0.5 px-1">
                             {new Date(msg.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
@@ -428,6 +496,7 @@ export default function ChatsPage() {
                     )
                   })
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* Notes */}
@@ -452,19 +521,26 @@ export default function ChatsPage() {
 
               {/* Send Message Form */}
               <div className="px-4 py-3 border-t border-gray-200">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
+                <div className="flex items-end gap-2">
+                  <textarea
                     value={messageContent}
-                    onChange={(e) => setMessageContent(e.target.value)}
+                    onChange={(e) => {
+                      setMessageContent(e.target.value)
+                      // 自動で高さを内容に合わせて拡張（最大240px）
+                      const el = e.target
+                      el.style.height = 'auto'
+                      el.style.height = Math.min(el.scrollHeight, 240) + 'px'
+                    }}
                     onKeyDown={handleKeyDown}
-                    placeholder="メッセージを入力..."
-                    className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="メッセージを入力...（送信は Cmd/Ctrl + Enter）"
+                    rows={1}
+                    className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500 resize-none overflow-y-auto leading-relaxed"
+                    style={{ minHeight: '40px', maxHeight: '240px' }}
                   />
                   <button
                     onClick={handleSendMessage}
                     disabled={sending || !messageContent.trim()}
-                    className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                     style={{ backgroundColor: '#06C755' }}
                   >
                     {sending ? '送信中...' : '送信'}

@@ -5,6 +5,12 @@ import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/lib/account-context'
+import ButtonsTemplateEditor, {
+  emptyButtonsValue,
+  serializeButtons,
+  deserializeButtons,
+  type ButtonsTemplateValue,
+} from '@/components/buttons-template-editor'
 
 interface Template {
   id: string
@@ -20,10 +26,11 @@ const messageTypeLabels: Record<string, string> = {
   text: 'テキスト',
   image: '画像',
   flex: 'Flex',
+  buttons: 'ボタン',
 }
 
-// LIFF mapping for "リンク取得" — clicking the resulting URL pushes the
-// template to the friend via /api/liff/send-template. Add new accounts here.
+// LIFF mapping mirrors the entry-routes page so "open form" actions resolve to
+// the right per-account LIFF endpoint. Update both places when adding accounts.
 const liffIdMap: Record<string, string> = {
   'd49a3a13-8169-4b25-a669-3c8a4f4f964d': '2009821004-brTkmVVK',
   '40adcb23-277b-4d9d-b6e2-92fde47d31fb': '2006855304-UfNPHFOn',
@@ -70,6 +77,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [form, setForm] = useState<CreateFormState>({
     name: '',
@@ -77,6 +85,7 @@ export default function TemplatesPage() {
     messageType: 'text',
     messageContent: '',
   })
+  const [buttonsValue, setButtonsValue] = useState<ButtonsTemplateValue>(emptyButtonsValue())
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const { selectedAccount } = useAccount()
@@ -120,32 +129,86 @@ export default function TemplatesPage() {
       setFormError('カテゴリを入力してください')
       return
     }
-    if (!form.messageContent.trim()) {
+
+    let messageContent = form.messageContent
+    if (form.messageType === 'buttons') {
+      if (!buttonsValue.text.trim()) {
+        setFormError('本文を入力してください')
+        return
+      }
+      const invalid = buttonsValue.actions.find((a) => {
+        if (!a.label.trim()) return true
+        if (a.kind === 'text') return !(a.text ?? '').trim()
+        if (a.kind === 'url') return !(a.url ?? '').trim()
+        if (a.kind === 'form') return !(a.formId ?? '').trim() || !liffId
+        if (a.kind === 'event') return !(a.eventSlug ?? '').trim() || !liffId
+        if (a.kind === 'scenario') return !(a.scenarioId ?? '').trim()
+        if (a.kind === 'tag') return !(a.tagId ?? '').trim()
+        return true
+      })
+      if (invalid) {
+        setFormError('全てのボタンにラベルと内容を入力してください（フォーム／イベントはアカウントのLIFF設定が必要）')
+        return
+      }
+      messageContent = JSON.stringify(serializeButtons(buttonsValue, liffId))
+    } else if (!form.messageContent.trim()) {
       setFormError('メッセージ内容を入力してください')
       return
     }
+
     setSaving(true)
     setFormError('')
     try {
       const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
-      const res = await api.templates.create({
+      const payload = {
         name: form.name,
         category: form.category,
         messageType: form.messageType,
-        messageContent: form.messageContent,
-      }, params)
+        messageContent,
+      }
+      const res = editingId
+        ? await api.templates.update(editingId, payload)
+        : await api.templates.create(payload, params)
       if (res.success) {
         setShowCreate(false)
+        setEditingId(null)
         setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+        setButtonsValue(emptyButtonsValue())
         load()
       } else {
         setFormError(res.error)
       }
     } catch {
-      setFormError('作成に失敗しました')
+      setFormError(editingId ? '更新に失敗しました' : '作成に失敗しました')
     } finally {
       setSaving(false)
     }
+  }
+
+  const startEdit = (template: Template) => {
+    setEditingId(template.id)
+    setShowCreate(true)
+    setForm({
+      name: template.name,
+      category: template.category,
+      messageType: template.messageType,
+      messageContent: template.messageContent,
+    })
+    if (template.messageType === 'buttons') {
+      const restored = deserializeButtons(template.messageContent)
+      setButtonsValue(restored ?? emptyButtonsValue())
+    } else {
+      setButtonsValue(emptyButtonsValue())
+    }
+    setFormError('')
+  }
+
+  const cancelEdit = () => {
+    setShowCreate(false)
+    setEditingId(null)
+    setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+    setButtonsValue(emptyButtonsValue())
+    setFormError('')
   }
 
   const handleDelete = async (id: string) => {
@@ -163,12 +226,53 @@ export default function TemplatesPage() {
       alert('このアカウントにはLIFFが設定されていません。左上でLIFFが紐付いたアカウントを選んでください。')
       return
     }
-    const url = `https://liff.line.me/${liffId}?page=send-template&id=${id}`
+    // liffId は path だけでなく query にも入れる必要あり。
+    // LIFF のリダイレクトで liff.state に詰められた後、main.ts は query から
+    // liffId を読んで liff.init() するため、欠けると env fallback で別チャネル
+    // を初期化しようとして "invalid liff id" になる。
+    const url = `https://liff.line.me/${liffId}?page=send-template&id=${id}&liffId=${liffId}`
     try {
       await navigator.clipboard.writeText(url)
       alert(`リンクをコピーしました\n${url}`)
     } catch {
       window.prompt('リンクをコピーしてください', url)
+    }
+  }
+
+  const handleTestSend = async (id: string) => {
+    if (!selectedAccount) {
+      alert('テスト送信するLINEアカウントを左上で選択してください')
+      return
+    }
+    try {
+      const res = await api.templates.testSend(id, selectedAccount.id)
+      if (res.success) {
+        alert(`テスト送信成功: ${res.data.sentTo}`)
+      } else {
+        alert(`テスト送信失敗: ${res.error}`)
+      }
+    } catch {
+      alert('テスト送信に失敗しました')
+    }
+  }
+
+  const handleUploadImage = async (file: File) => {
+    try {
+      const res = await api.uploads.image(file)
+      if (!res.success) {
+        setFormError(res.error)
+        return
+      }
+      // For image-type templates, message_content is JSON
+      // { originalContentUrl, previewImageUrl }; pre-fill both with the
+      // uploaded URL so operators don't have to author the JSON manually.
+      const next = JSON.stringify({
+        originalContentUrl: res.data.url,
+        previewImageUrl: res.data.url,
+      }, null, 2)
+      setForm((f) => ({ ...f, messageContent: next }))
+    } catch {
+      setFormError('アップロードに失敗しました')
     }
   }
 
@@ -228,7 +332,7 @@ export default function TemplatesPage() {
       {/* Create form */}
       {showCreate && (
         <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">新規テンプレートを作成</h2>
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">{editingId ? 'テンプレートを編集' : '新規テンプレートを作成'}</h2>
           <div className="space-y-4 max-w-lg">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">テンプレート名 <span className="text-red-500">*</span></label>
@@ -255,23 +359,58 @@ export default function TemplatesPage() {
               <select
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
                 value={form.messageType}
-                onChange={(e) => setForm({ ...form, messageType: e.target.value })}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setForm({ ...form, messageType: next })
+                  if (next === 'buttons') {
+                    const restored = form.messageContent ? deserializeButtons(form.messageContent) : null
+                    setButtonsValue(restored ?? emptyButtonsValue())
+                  }
+                }}
               >
                 <option value="text">テキスト</option>
                 <option value="image">画像</option>
                 <option value="flex">Flex</option>
+                <option value="buttons">ボタン（画像 + タイトル + ボタン）</option>
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージ内容 <span className="text-red-500">*</span></label>
-              <textarea
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
-                rows={4}
-                placeholder="メッセージ内容を入力してください"
-                value={form.messageContent}
-                onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
-              />
-            </div>
+            {form.messageType === 'buttons' ? (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-2">ボタンテンプレートの内容 <span className="text-red-500">*</span></label>
+                <ButtonsTemplateEditor value={buttonsValue} onChange={setButtonsValue} liffId={liffId} />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">メッセージ内容 <span className="text-red-500">*</span></label>
+                {form.messageType === 'image' && (
+                  <div className="mb-2">
+                    <label className="text-xs text-gray-600 cursor-pointer hover:text-gray-900 inline-flex items-center gap-1">
+                      <span className="px-2 py-1 border border-gray-300 rounded bg-gray-50 hover:bg-gray-100 text-xs">
+                        📁 画像をファイルから選択
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/gif,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) void handleUploadImage(f)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                    <span className="text-[11px] text-gray-400 ml-2">アップロード後、下のJSONが自動入力されます</span>
+                  </div>
+                )}
+                <textarea
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none font-mono"
+                  rows={form.messageType === 'image' ? 5 : 4}
+                  placeholder={form.messageType === 'image' ? '{"originalContentUrl":"https://...","previewImageUrl":"https://..."}' : 'メッセージ内容を入力してください'}
+                  value={form.messageContent}
+                  onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
+                />
+              </div>
+            )}
 
             {formError && <p className="text-xs text-red-600">{formError}</p>}
 
@@ -282,10 +421,10 @@ export default function TemplatesPage() {
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
                 style={{ backgroundColor: '#06C755' }}
               >
-                {saving ? '作成中...' : '作成'}
+                {saving ? (editingId ? '更新中...' : '作成中...') : (editingId ? '更新' : '作成')}
               </button>
               <button
-                onClick={() => { setShowCreate(false); setFormError('') }}
+                onClick={cancelEdit}
                 className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
               >
                 キャンセル
@@ -375,6 +514,19 @@ export default function TemplatesPage() {
                         className="px-3 py-1 text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         リンク取得
+                      </button>
+                      <button
+                        onClick={() => handleTestSend(template.id)}
+                        className="px-3 py-1 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90"
+                        style={{ backgroundColor: '#06C755' }}
+                      >
+                        テスト送信
+                      </button>
+                      <button
+                        onClick={() => startEdit(template)}
+                        className="px-3 py-1 text-xs font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                      >
+                        編集
                       </button>
                       <button
                         onClick={() => handleDelete(template.id)}

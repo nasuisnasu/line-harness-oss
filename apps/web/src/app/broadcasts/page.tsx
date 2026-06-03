@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast } from '@/lib/api'
 import Header from '@/components/layout/header'
@@ -48,13 +48,21 @@ function formatDatetime(iso: string | null): string {
   })
 }
 
+interface AudiencePreview {
+  count: number
+  sample: { id: string; displayName: string | null }[]
+}
+
 export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [sendingId, setSendingId] = useState<string | null>(null)
+  const [editingBroadcast, setEditingBroadcast] = useState<ApiBroadcast | null>(null)
+  const [audiences, setAudiences] = useState<Record<string, AudiencePreview>>({})
+  const [expandedAudienceId, setExpandedAudienceId] = useState<string | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const { selectedAccount } = useAccount()
 
   const load = useCallback(async () => {
@@ -78,19 +86,6 @@ export default function BroadcastsPage() {
 
   useEffect(() => { load() }, [load])
 
-  const handleSend = async (id: string) => {
-    if (!confirm('この配信を今すぐ送信してもよいですか？')) return
-    setSendingId(id)
-    try {
-      await api.broadcasts.send(id)
-      load()
-    } catch {
-      setError('送信に失敗しました')
-    } finally {
-      setSendingId(null)
-    }
-  }
-
   const handleDelete = async (id: string) => {
     if (!confirm('この配信を削除してもよいですか？')) return
     try {
@@ -104,6 +99,38 @@ export default function BroadcastsPage() {
   const getTagName = (tagId: string | null) => {
     if (!tagId) return null
     return tags.find((t) => t.id === tagId)?.name ?? null
+  }
+
+  const toggleAudience = async (broadcastId: string) => {
+    if (expandedAudienceId === broadcastId) {
+      setExpandedAudienceId(null)
+      return
+    }
+    setExpandedAudienceId(broadcastId)
+    if (!audiences[broadcastId]) {
+      const res = await api.broadcasts.audience(broadcastId)
+      if (res.success) setAudiences((m) => ({ ...m, [broadcastId]: res.data }))
+    }
+  }
+
+  // Group broadcasts by groupName ("(未分類)" for empty group).
+  const grouped = useMemo(() => {
+    const map = new Map<string, ApiBroadcast[]>()
+    for (const b of broadcasts) {
+      const key = (b.groupName ?? '').trim() || '(未分類)'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(b)
+    }
+    return Array.from(map.entries())
+  }, [broadcasts])
+
+  const toggleGroup = (name: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
   }
 
   return (
@@ -128,12 +155,14 @@ export default function BroadcastsPage() {
         </div>
       )}
 
-      {/* Create form */}
-      {showCreate && (
+      {/* Create / Edit form */}
+      {(showCreate || editingBroadcast) && (
         <BroadcastForm
           tags={tags}
-          onSuccess={() => { setShowCreate(false); load() }}
-          onCancel={() => setShowCreate(false)}
+          lineAccountId={selectedAccount?.id ?? null}
+          editing={editingBroadcast}
+          onSuccess={() => { setShowCreate(false); setEditingBroadcast(null); load() }}
+          onCancel={() => { setShowCreate(false); setEditingBroadcast(null) }}
         />
       )}
 
@@ -156,118 +185,145 @@ export default function BroadcastsPage() {
           <p className="text-gray-500">配信がありません。「新規配信」から作成してください。</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  配信タイトル
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  ステータス
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  配信対象
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  予約日時
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  送信完了日時
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  実績
-                </th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {broadcasts.map((broadcast) => {
-                const statusInfo = statusConfig[broadcast.status]
-                const tagName = getTagName(broadcast.targetTagId)
-                const isSending = sendingId === broadcast.id
-
-                return (
-                  <tr key={broadcast.id} className="hover:bg-gray-50 transition-colors">
-                    {/* Title */}
-                    <td className="px-4 py-3">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{broadcast.title}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {broadcast.messageType === 'text' ? 'テキスト' : broadcast.messageType === 'image' ? '画像' : 'Flex'}
-                        </p>
-                      </div>
-                    </td>
-
-                    {/* Status */}
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
-                        {statusInfo.label}
-                      </span>
-                    </td>
-
-                    {/* Target */}
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {broadcast.targetType === 'all' ? (
-                        '全員'
-                      ) : tagName ? (
-                        <span>タグ: {tagName}</span>
-                      ) : (
-                        'タグ指定'
-                      )}
-                    </td>
-
-                    {/* Scheduled */}
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {formatDatetime(broadcast.scheduledAt)}
-                    </td>
-
-                    {/* Sent */}
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {formatDatetime(broadcast.sentAt)}
-                    </td>
-
-                    {/* Stats */}
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {broadcast.status === 'sent' ? (
-                        <span>
-                          {broadcast.successCount.toLocaleString('ja-JP')} / {broadcast.totalCount.toLocaleString('ja-JP')} 件
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {broadcast.status === 'draft' && (
-                          <button
-                            onClick={() => handleSend(broadcast.id)}
-                            disabled={isSending}
-                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-white rounded-md disabled:opacity-50 transition-opacity"
-                            style={{ backgroundColor: '#06C755' }}
-                          >
-                            {isSending ? '送信中...' : '今すぐ送信'}
-                          </button>
-                        )}
-                        {(broadcast.status === 'draft' || broadcast.status === 'scheduled') && (
-                          <button
-                            onClick={() => handleDelete(broadcast.id)}
-                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-                          >
-                            削除
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          </div>
+        <div className="space-y-4">
+          {grouped.map(([groupName, items]) => {
+            const isCollapsed = collapsedGroups.has(groupName)
+            return (
+              <div key={groupName} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                <button
+                  onClick={() => toggleGroup(groupName)}
+                  className="w-full px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <svg className={`w-4 h-4 text-gray-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                    <span className="text-sm font-semibold text-gray-700">{groupName}</span>
+                    <span className="text-xs text-gray-400">{items.length}件</span>
+                  </div>
+                </button>
+                {!isCollapsed && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px]">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">配信タイトル</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">ステータス</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">配信対象</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">予約日時</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">送信完了日時</th>
+                          <th className="px-4 py-2 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">実績</th>
+                          <th className="px-4 py-2" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {items.map((broadcast) => {
+                          const statusInfo = statusConfig[broadcast.status]
+                          const tagName = getTagName(broadcast.targetTagId)
+                          const audience = audiences[broadcast.id]
+                          const isAudienceOpen = expandedAudienceId === broadcast.id
+                          const showAudienceButton = broadcast.status === 'draft' || broadcast.status === 'scheduled'
+                          return (
+                            <>
+                              <tr key={broadcast.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-4 py-3">
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-900">{broadcast.title}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {broadcast.messageType === 'text' ? 'テキスト' : broadcast.messageType === 'image' ? '画像' : broadcast.messageType === 'buttons' ? 'ボタン' : 'Flex'}
+                                    </p>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
+                                    {statusInfo.label}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  <div className="flex items-center gap-2">
+                                    <span>
+                                      {broadcast.targetType === 'all' ? '全員' : tagName ? `タグ: ${tagName}` : 'タグ指定'}
+                                    </span>
+                                    {showAudienceButton && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleAudience(broadcast.id)}
+                                        className="text-[11px] text-blue-600 hover:text-blue-800 underline"
+                                      >
+                                        {isAudienceOpen ? '閉じる' : '対象を確認'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-500">{formatDatetime(broadcast.scheduledAt)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500">{formatDatetime(broadcast.sentAt)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500">
+                                  {broadcast.status === 'sent' ? (
+                                    <span>{broadcast.successCount.toLocaleString('ja-JP')} / {broadcast.totalCount.toLocaleString('ja-JP')} 件</span>
+                                  ) : '-'}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {showAudienceButton && (
+                                      <button
+                                        onClick={() => { setEditingBroadcast(broadcast); setShowCreate(false) }}
+                                        className="px-3 py-1 min-h-[44px] text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                                      >
+                                        編集
+                                      </button>
+                                    )}
+                                    {showAudienceButton && (
+                                      <button
+                                        onClick={() => handleDelete(broadcast.id)}
+                                        className="px-3 py-1 min-h-[44px] text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+                                      >
+                                        削除
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                              {isAudienceOpen && (
+                                <tr key={`${broadcast.id}-audience`} className="bg-blue-50/50">
+                                  <td colSpan={7} className="px-4 py-3">
+                                    {!audience ? (
+                                      <p className="text-xs text-gray-400">読み込み中...</p>
+                                    ) : audience.count === 0 ? (
+                                      <p className="text-xs text-red-500">⚠ 配信対象0人。フィルター条件を確認してください。</p>
+                                    ) : (
+                                      <div className="space-y-1.5">
+                                        <p className="text-sm text-gray-700">
+                                          <span className="font-semibold text-blue-700">{audience.count.toLocaleString('ja-JP')}人</span> に配信予定
+                                        </p>
+                                        {audience.sample.length > 0 && (
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {audience.sample.map((f) => (
+                                              <span key={f.id} className="text-[11px] bg-white px-2 py-0.5 rounded border border-gray-200 text-gray-700">
+                                                {f.displayName ?? '(名前なし)'}
+                                              </span>
+                                            ))}
+                                            {audience.count > audience.sample.length && (
+                                              <span className="text-[11px] text-gray-400 px-2 py-0.5">
+                                                ほか{(audience.count - audience.sample.length).toLocaleString('ja-JP')}人
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 

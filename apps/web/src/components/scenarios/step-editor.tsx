@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { ScenarioStep, MessageType } from '@line-crm/shared'
+import MessageEditor from '@/components/message-editor'
 
 interface StepEditorProps {
   step?: ScenarioStep
@@ -14,6 +15,8 @@ const messageTypeLabels: Record<MessageType, string> = {
   text: 'テキスト',
   image: '画像',
   flex: 'Flexメッセージ',
+  buttons: 'ボタン',
+  richmenu: 'リッチメニュー切替',
 }
 
 function minutesToDisplay(minutes: number): { days: number; hours: number; mins: number } {
@@ -184,20 +187,27 @@ export default function StepEditor({ step, stepOrder, onSave, onCancel }: StepEd
           )
         })()}
 
-        <textarea
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
-          rows={messageType === 'flex' ? 8 : messageType === 'image' ? 3 : 4}
-          placeholder={
-            messageType === 'text'
-              ? 'メッセージテキストを入力...'
-              : messageType === 'image'
-              ? '{"originalContentUrl":"...","previewImageUrl":"..."}'
-              : '{"type":"bubble","body":{...}}'
-          }
-          value={messageContent}
-          onChange={(e) => setMessageContent(e.target.value)}
-          style={{ fontFamily: messageType !== 'text' ? 'monospace' : 'inherit' }}
-        />
+        {messageType === 'text' ? (
+          <MessageEditor
+            value={messageContent}
+            onChange={setMessageContent}
+            placeholder="メッセージテキストを入力..."
+            rows={4}
+          />
+        ) : (
+          <textarea
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
+            rows={messageType === 'flex' ? 8 : 3}
+            placeholder={
+              messageType === 'image'
+                ? '{"originalContentUrl":"...","previewImageUrl":"..."}'
+                : '{"type":"bubble","body":{...}}'
+            }
+            value={messageContent}
+            onChange={(e) => setMessageContent(e.target.value)}
+            style={{ fontFamily: 'monospace' }}
+          />
+        )}
         {messageType === 'image' && (
           <p className="text-xs text-gray-400 mt-1">上のURLフォームか、直接JSONを編集できます</p>
         )}

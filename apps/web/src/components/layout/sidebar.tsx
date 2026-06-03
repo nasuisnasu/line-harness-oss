@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAccount } from '@/lib/account-context'
+import { useCcPromptContext } from '@/lib/cc-prompt-context'
+import PromptModal from '@/components/prompt-modal'
 
 // ─── メニュー定義（ユーザー目線のカテゴリ） ───
 
@@ -22,7 +24,15 @@ const menuSections = [
     items: [
       { href: '/scenarios', label: 'シナリオ配信', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
       { href: '/broadcasts', label: '一斉配信', icon: 'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z' },
+      { href: '/actions', label: 'アクション', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+      { href: '/auto-replies', label: 'キーワード自動応答', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
+      { href: '/events', label: 'イベント', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+      { href: '/integrations/google-calendar', label: 'Google Calendar連携', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
+      { href: '/tracked-links', label: 'トラッキングリンク', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' },
+      { href: '/rich-menus', label: 'リッチメニュー', icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z' },
+      { href: '/forms', label: 'フォーム', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
       { href: '/templates', label: 'テンプレート', icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z' },
+      { href: '/files', label: 'ファイル', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
       { href: '/reminders', label: 'リマインダ', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
     ],
   },
@@ -66,6 +76,8 @@ export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const { accounts, selectedAccount, setSelectedAccount } = useAccount()
+  const { prompts: ccPrompts } = useCcPromptContext()
+  const [ccOpen, setCcOpen] = useState(false)
 
   useEffect(() => { setIsOpen(false) }, [pathname])
   useEffect(() => {
@@ -169,6 +181,15 @@ export default function Sidebar() {
 
       {/* フッター */}
       <div className="px-6 py-4 border-t border-gray-200 space-y-3">
+        {ccPrompts.length > 0 && (
+          <button
+            onClick={() => setCcOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+          >
+            <span className="text-base leading-none">📋</span>
+            <span>CCに依頼</span>
+          </button>
+        )}
         <p className="text-xs text-gray-400">LINE Harness v0.1</p>
         <button
           onClick={() => {
@@ -227,6 +248,8 @@ export default function Sidebar() {
       <aside className="hidden lg:flex w-64 bg-white border-r border-gray-200 flex-col h-screen sticky top-0">
         {sidebarContent}
       </aside>
+
+      <PromptModal isOpen={ccOpen} onClose={() => setCcOpen(false)} prompts={ccPrompts} />
     </>
   )
 }

@@ -10,8 +10,15 @@ interface LineAccountListItem {
   channelId: string
   name: string
   isActive: boolean
+  welcomeFallbackMessage: string | null
+  testFriendId: string | null
   createdAt: string
   updatedAt: string
+}
+
+interface FriendOption {
+  id: string
+  displayName: string | null
 }
 
 const ccPrompts = [
@@ -40,8 +47,9 @@ export default function AccountsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ channelId: '', name: '', channelAccessToken: '', channelSecret: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', channelAccessToken: '', channelSecret: '' })
+  const [editForm, setEditForm] = useState({ name: '', channelAccessToken: '', channelSecret: '', welcomeFallbackMessage: '', testFriendId: '' })
   const [editSaving, setEditSaving] = useState(false)
+  const [editFriends, setEditFriends] = useState<FriendOption[]>([])
 
   const load = async () => {
     setLoading(true)
@@ -78,16 +86,26 @@ export default function AccountsPage() {
     load()
   }
 
-  const openEdit = (account: LineAccountListItem) => {
+  const openEdit = async (account: LineAccountListItem) => {
     setEditingId(account.id)
-    setEditForm({ name: account.name, channelAccessToken: '', channelSecret: '' })
+    setEditForm({ name: account.name, channelAccessToken: '', channelSecret: '', welcomeFallbackMessage: account.welcomeFallbackMessage ?? '', testFriendId: account.testFriendId ?? '' })
+    try {
+      const res = await api.friends.list({ lineAccountId: account.id, limit: '500' })
+      if (res.success) {
+        setEditFriends(res.data.items.map(f => ({ id: f.id, displayName: f.displayName })))
+      }
+    } catch { /* ignore */ }
   }
 
   const handleSaveEdit = async () => {
     if (!editingId) return
     setEditSaving(true)
     try {
-      const payload: Record<string, string> = { name: editForm.name }
+      const payload: Record<string, string | null> = {
+        name: editForm.name,
+        welcomeFallbackMessage: editForm.welcomeFallbackMessage || null,
+        testFriendId: editForm.testFriendId || null,
+      }
       if (editForm.channelAccessToken) payload.channelAccessToken = editForm.channelAccessToken
       if (editForm.channelSecret) payload.channelSecret = editForm.channelSecret
       await api.lineAccounts.update(editingId, payload)
@@ -223,6 +241,19 @@ export default function AccountsPage() {
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Channel Secret（変更する場合のみ）</label>
                     <input type="password" className="w-full border border-gray-300 rounded px-2 py-1 text-sm" placeholder="変更しない場合は空欄" value={editForm.channelSecret} onChange={e => setEditForm({ ...editForm, channelSecret: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">流入経路不明時のメッセージ（空欄=送信しない）</label>
+                    <textarea rows={3} className="w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none" placeholder="友だち追加ありがとうございます！どこからお越しいただいたか、スタンプを1つ送っていただけますか？" value={editForm.welcomeFallbackMessage} onChange={e => setEditForm({ ...editForm, welcomeFallbackMessage: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">テスト配信先（一斉配信のテスト送信先）</label>
+                    <select className="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white" value={editForm.testFriendId} onChange={e => setEditForm({ ...editForm, testFriendId: e.target.value })}>
+                      <option value="">設定なし</option>
+                      {editFriends.map(f => (
+                        <option key={f.id} value={f.id}>{f.displayName ?? '(名無し)'}</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button onClick={handleSaveEdit} disabled={editSaving} className="px-3 py-1 text-sm text-white rounded disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>{editSaving ? '保存中...' : '保存'}</button>

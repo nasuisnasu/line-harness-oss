@@ -8,6 +8,7 @@ import Header from '@/components/layout/header'
 import FriendTable from '@/components/friends/friend-table'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/lib/account-context'
+import { withGroup } from '@/lib/format-group'
 
 const ccPrompts = [
   {
@@ -108,7 +109,7 @@ export default function FriendsPage() {
           >
             <option value="">すべて</option>
             {allTags.map((tag) => (
-              <option key={tag.id} value={tag.id}>{tag.name}</option>
+              <option key={tag.id} value={tag.id}>{withGroup(tag.name, tag.groupName)}</option>
             ))}
           </select>
         </div>

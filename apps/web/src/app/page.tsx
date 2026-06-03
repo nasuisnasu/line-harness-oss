@@ -232,6 +232,9 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* 日別友達推移テーブル */}
+      <DailyFriendStats lineAccountId={selectedAccount?.id ?? null} />
+
       {/* Quick links */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-gray-800 mb-4">クイックアクション</h2>
@@ -319,6 +322,95 @@ export default function DashboardPage() {
       </div>
 
       <CcPromptButton prompts={ccPrompts} />
+    </div>
+  )
+}
+
+interface DailyStatRow { date: string; added: number; blocked: number; cumulative: number }
+
+function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
+  const [rows, setRows] = useState<DailyStatRow[]>([])
+  const [days, setDays] = useState(14)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    api.friends
+      .dailyStats({ ...(lineAccountId ? { lineAccountId } : {}), days })
+      .then((res) => {
+        if (cancelled) return
+        if (res.success) setRows(res.data)
+        else setError(res.error)
+      })
+      .catch(() => { if (!cancelled) setError('日別データの取得に失敗しました') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [lineAccountId, days])
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso + 'T00:00:00+09:00')
+    const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()]
+    return `${d.getMonth() + 1}/${d.getDate()}(${wd})`
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h2 className="text-sm font-semibold text-gray-800">日別友達推移</h2>
+        <select
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
+          className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white"
+        >
+          <option value={7}>過去7日</option>
+          <option value={14}>過去14日</option>
+          <option value={30}>過去30日</option>
+          <option value={60}>過去60日</option>
+        </select>
+      </div>
+
+      {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[440px] text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
+              <th className="text-left px-3 py-2 font-semibold">日付</th>
+              <th className="text-right px-3 py-2 font-semibold">新規追加</th>
+              <th className="text-right px-3 py-2 font-semibold">ブロック</th>
+              <th className="text-right px-3 py-2 font-semibold">累計（有効）</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {loading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i}>
+                  <td className="px-3 py-2"><div className="h-3 bg-gray-100 rounded w-16 animate-pulse" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-10 ml-auto animate-pulse" /></td>
+                </tr>
+              ))
+            ) : (
+              rows.slice().reverse().map((r) => (
+                <tr key={r.date} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-gray-700">{formatDate(r.date)}</td>
+                  <td className="px-3 py-2 text-right">
+                    {r.added > 0 ? <span className="text-green-600 font-semibold">+{r.added}</span> : <span className="text-gray-300">0</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {r.blocked > 0 ? <span className="text-red-500 font-semibold">-{r.blocked}</span> : <span className="text-gray-300">0</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right text-gray-900 font-semibold">{r.cumulative}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Scenario, ScenarioTriggerType } from '@line-crm/shared'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import ScenarioList from '@/components/scenarios/scenario-list'
+import GroupPicker from '@/components/group-picker'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/lib/account-context'
+import { withGroup } from '@/lib/format-group'
 
 const ccPrompts = [
   {
@@ -42,6 +44,7 @@ interface CreateFormState {
   triggerType: ScenarioTriggerType
   triggerTagId: string
   isActive: boolean
+  groupName: string
 }
 
 export default function ScenariosPage() {
@@ -49,14 +52,20 @@ export default function ScenariosPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [tags, setTags] = useState<{ id: string; name: string }[]>([])
+  const [tags, setTags] = useState<{ id: string; name: string; groupName?: string | null }[]>([])
   const [form, setForm] = useState<CreateFormState>({
     name: '',
     description: '',
     triggerType: 'friend_add',
     triggerTagId: '',
     isActive: true,
+    groupName: '',
   })
+  const [groupFilter, setGroupFilter] = useState<string>('')
+  const existingGroups = useMemo(
+    () => Array.from(new Set(scenarios.map(s => s.groupName).filter((g): g is string => !!g))).sort(),
+    [scenarios],
+  )
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const { selectedAccount } = useAccount()
@@ -100,10 +109,11 @@ export default function ScenariosPage() {
         triggerTagId: form.triggerTagId || null,
         isActive: form.isActive,
         lineAccountId: selectedAccount?.id ?? null,
+        groupName: form.groupName.trim() || null,
       })
       if (res.success) {
         setShowCreate(false)
-        setForm({ name: '', description: '', triggerType: 'friend_add', triggerTagId: '', isActive: true })
+        setForm({ name: '', description: '', triggerType: 'friend_add', triggerTagId: '', isActive: true, groupName: '' })
         loadScenarios()
       } else {
         setFormError(res.error)
@@ -130,6 +140,15 @@ export default function ScenariosPage() {
       loadScenarios()
     } catch {
       setError('削除に失敗しました')
+    }
+  }
+
+  const handleUpdateGroup = async (id: string, groupName: string | null) => {
+    try {
+      await api.scenarios.update(id, { groupName })
+      loadScenarios()
+    } catch {
+      setError('グループの更新に失敗しました')
     }
   }
 
@@ -202,11 +221,20 @@ export default function ScenariosPage() {
                 >
                   <option value="">タグを選択</option>
                   {tags.map((tag) => (
-                    <option key={tag.id} value={tag.id}>{tag.name}</option>
+                    <option key={tag.id} value={tag.id}>{withGroup(tag.name, tag.groupName)}</option>
                   ))}
                 </select>
               </div>
             )}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">グループ（任意）</label>
+              <GroupPicker
+                value={form.groupName}
+                onChange={(v) => setForm({ ...form, groupName: v })}
+                existingGroups={existingGroups}
+                placeholder="例: ウェルカム / セミナー誘導 / 教材配布"
+              />
+            </div>
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -240,6 +268,52 @@ export default function ScenariosPage() {
         </div>
       )}
 
+      {/* Group filter chips — always shown so the grouping concept is visible
+          even before any groups have been created. */}
+      {!loading && scenarios.length > 0 && (
+        <div className="mb-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500">グループ:</span>
+          <button
+            onClick={() => setGroupFilter('')}
+            className={`text-xs px-2.5 py-1 rounded-full border ${groupFilter === '' ? 'text-white border-transparent' : 'text-gray-600 bg-white border-gray-300'}`}
+            style={groupFilter === '' ? { backgroundColor: '#06C755' } : undefined}
+          >
+            すべて
+          </button>
+          {existingGroups.map(g => (
+            <span key={g} className={`inline-flex items-center text-xs rounded-full border ${groupFilter === g ? 'text-white border-transparent' : 'text-gray-600 bg-white border-gray-300'}`} style={groupFilter === g ? { backgroundColor: '#06C755' } : undefined}>
+              <button
+                onClick={() => setGroupFilter(g)}
+                className="pl-2.5 pr-1 py-1"
+              >
+                {g}
+              </button>
+              <button
+                onClick={async () => {
+                  const next = window.prompt(`グループ名を編集（空欄で「未分類」へ移動）`, g)
+                  if (next === null) return
+                  const trimmed = next.trim()
+                  if (trimmed === g) return
+                  await api.scenarios.renameGroup(g, trimmed || null)
+                  if (groupFilter === g) setGroupFilter(trimmed || '')
+                  loadScenarios()
+                }}
+                title="グループ名を編集"
+                className={`pl-1 pr-2 py-1 text-[10px] ${groupFilter === g ? 'text-white/70 hover:text-white' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                ✎
+              </button>
+            </span>
+          ))}
+          <button
+            onClick={() => setGroupFilter('__none__')}
+            className={`text-xs px-2.5 py-1 rounded-full border ${groupFilter === '__none__' ? 'text-white border-transparent' : 'text-gray-500 bg-white border-gray-300'}`}
+            style={groupFilter === '__none__' ? { backgroundColor: '#9CA3AF' } : undefined}
+          >
+            未分類
+          </button>
+        </div>
+      )}
       {/* Loading skeleton */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -254,14 +328,49 @@ export default function ScenariosPage() {
             </div>
           ))}
         </div>
-      ) : (
-        <ScenarioList
-          scenarios={scenarios}
-          onToggleActive={handleToggleActive}
-          onDelete={handleDelete}
-          loading={loading}
-        />
-      )}
+      ) : (() => {
+        const filtered = groupFilter === ''
+          ? scenarios
+          : groupFilter === '__none__'
+            ? scenarios.filter(s => !s.groupName)
+            : scenarios.filter(s => s.groupName === groupFilter)
+        const buckets = new Map<string, ScenarioWithCount[]>()
+        for (const s of filtered) {
+          const key = s.groupName ?? '未分類'
+          const arr = buckets.get(key) ?? []
+          arr.push(s)
+          buckets.set(key, arr)
+        }
+        const orderedGroups = Array.from(buckets.keys()).sort((a, b) => {
+          if (a === '未分類') return 1
+          if (b === '未分類') return -1
+          return a.localeCompare(b)
+        })
+        // Always render with group headers so the grouping concept is
+        // visible even when nothing has been categorized yet.
+        return (
+          <div className="space-y-6">
+            {orderedGroups.map(groupName => {
+              const items = buckets.get(groupName)!
+              return (
+                <div key={groupName}>
+                  <div className="mb-2 text-xs font-semibold text-gray-700 px-1 py-1">
+                    {groupName} <span className="text-gray-400 font-normal ml-1">({items.length})</span>
+                  </div>
+                  <ScenarioList
+                    scenarios={items}
+                    onToggleActive={handleToggleActive}
+                    onDelete={handleDelete}
+                    loading={loading}
+                    onUpdateGroup={handleUpdateGroup}
+                    existingGroups={existingGroups}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
 
       <CcPromptButton prompts={ccPrompts} />
     </div>
