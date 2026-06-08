@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { api } from '@/lib/api'
+import { api, type EventItem } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/lib/account-context'
 
@@ -326,20 +326,31 @@ export default function DashboardPage() {
   )
 }
 
-interface DailyStatRow { date: string; added: number; blocked: number; cumulative: number }
+interface DailyStatRow { date: string; added: number; blocked: number; cumulative: number; bookings: number }
 
 function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
   const [rows, setRows] = useState<DailyStatRow[]>([])
   const [days, setDays] = useState(14)
+  const [events, setEvents] = useState<EventItem[]>([])
+  const [eventId, setEventId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  // 申込み絞り込み用のイベント一覧（相談系イベント）。アカウント切替で選択リセット。
+  useEffect(() => {
+    setEventId('')
+    const params = lineAccountId ? { lineAccountId } : undefined
+    api.events.list(params)
+      .then((res) => { if (res.success) setEvents(res.data) })
+      .catch(() => {})
+  }, [lineAccountId])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError('')
     api.friends
-      .dailyStats({ ...(lineAccountId ? { lineAccountId } : {}), days })
+      .dailyStats({ ...(lineAccountId ? { lineAccountId } : {}), days, ...(eventId ? { eventId } : {}) })
       .then((res) => {
         if (cancelled) return
         if (res.success) setRows(res.data)
@@ -348,7 +359,10 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
       .catch(() => { if (!cancelled) setError('日別データの取得に失敗しました') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [lineAccountId, days])
+  }, [lineAccountId, days, eventId])
+
+  const totalAdded = rows.reduce((s, r) => s + r.added, 0)
+  const totalBookings = rows.reduce((s, r) => s + r.bookings, 0)
 
   const formatDate = (iso: string) => {
     const d = new Date(iso + 'T00:00:00+09:00')
@@ -359,18 +373,44 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h2 className="text-sm font-semibold text-gray-800">日別友達推移</h2>
-        <select
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white"
-        >
-          <option value={7}>過去7日</option>
-          <option value={14}>過去14日</option>
-          <option value={30}>過去30日</option>
-          <option value={60}>過去60日</option>
-        </select>
+        <h2 className="text-sm font-semibold text-gray-800">日別 友達追加・申込み推移</h2>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value)}
+            className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white"
+          >
+            <option value="">申込み: すべて</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>申込み: {ev.name}</option>
+            ))}
+          </select>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white"
+          >
+            <option value={7}>過去7日</option>
+            <option value={14}>過去14日</option>
+            <option value={30}>過去30日</option>
+            <option value={60}>過去60日</option>
+          </select>
+        </div>
       </div>
+
+      {/* 期間合計サマリー */}
+      {!loading && (
+        <div className="flex gap-3 mb-3 flex-wrap">
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-green-50">
+            <span className="text-xs text-gray-500">期間の友達追加</span>
+            <span className="text-base font-bold text-green-600">+{totalAdded}</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-blue-50">
+            <span className="text-xs text-gray-500">期間の申込み</span>
+            <span className="text-base font-bold text-blue-600">{totalBookings}</span>
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
 
@@ -380,6 +420,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
             <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
               <th className="text-left px-3 py-2 font-semibold">日付</th>
               <th className="text-right px-3 py-2 font-semibold">新規追加</th>
+              <th className="text-right px-3 py-2 font-semibold">申込み</th>
               <th className="text-right px-3 py-2 font-semibold">ブロック</th>
               <th className="text-right px-3 py-2 font-semibold">累計（有効）</th>
             </tr>
@@ -391,6 +432,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
                   <td className="px-3 py-2"><div className="h-3 bg-gray-100 rounded w-16 animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-10 ml-auto animate-pulse" /></td>
                 </tr>
               ))
@@ -400,6 +442,9 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
                   <td className="px-3 py-2 text-gray-700">{formatDate(r.date)}</td>
                   <td className="px-3 py-2 text-right">
                     {r.added > 0 ? <span className="text-green-600 font-semibold">+{r.added}</span> : <span className="text-gray-300">0</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {r.bookings > 0 ? <span className="text-blue-600 font-semibold">{r.bookings}</span> : <span className="text-gray-300">0</span>}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {r.blocked > 0 ? <span className="text-red-500 font-semibold">-{r.blocked}</span> : <span className="text-gray-300">0</span>}
