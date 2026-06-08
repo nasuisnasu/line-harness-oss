@@ -77,8 +77,8 @@ export const api = {
       fetchApi<ApiResponse<{ count: number }>>(
         '/api/friends/count' + (params ? '?' + new URLSearchParams(params as Record<string, string>) : '')
       ),
-    dailyStats: (params?: { lineAccountId?: string; days?: number }) =>
-      fetchApi<ApiResponse<{ date: string; added: number; blocked: number; cumulative: number }[]>>(
+    dailyStats: (params?: { lineAccountId?: string; days?: number; eventId?: string }) =>
+      fetchApi<ApiResponse<{ date: string; added: number; blocked: number; cumulative: number; bookings: number }[]>>(
         '/api/friends/daily-stats' + (params ? '?' + new URLSearchParams(
           Object.fromEntries(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
         ) : '')
@@ -569,9 +569,14 @@ export const api = {
       ),
   },
   chats: {
-    list: (params?: { status?: string; operatorId?: string }) =>
+    list: (params?: { status?: string; operatorId?: string; lineAccountId?: string; tagId?: string; q?: string }) =>
       fetchApi<ApiResponse<Chat[]>>(
         '/api/chats?' + new URLSearchParams(params as Record<string, string>),
+      ),
+    /** 友だちIDからチャットを取得（無ければ作成）。友だち管理→チャットを開く用。 */
+    byFriend: (friendId: string) =>
+      fetchApi<ApiResponse<{ id: string; friendId: string; status: Chat['status'] }>>(
+        `/api/chats/by-friend/${friendId}`,
       ),
     get: (id: string) =>
       fetchApi<ApiResponse<Chat & { messages?: { id: string; content: string; senderType: string; createdAt: string }[] }>>(
@@ -985,6 +990,7 @@ export interface ConsultationConfig {
   slotIntervalMinutes: number
   bookingFormFields: FormFieldItem[]
   bookingFormSubmitLabel?: string | null
+  availableUntilDate?: string | null
 }
 
 export interface EventBookingItem {

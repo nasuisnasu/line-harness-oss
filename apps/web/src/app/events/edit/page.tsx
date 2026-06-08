@@ -220,6 +220,16 @@ function Inner() {
               <label className="block text-xs font-medium text-gray-600 mb-1">最長予約（日先まで）</label>
               <input type="number" min={1} value={config.advanceMaxDays} onChange={e => updateConfig({ advanceMaxDays: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
             </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">予約受付の最終日（任意）</label>
+              <div className="flex gap-2 items-center">
+                <input type="date" value={config.availableUntilDate ?? ''} onChange={e => updateConfig({ availableUntilDate: e.target.value || null })} className="border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                {config.availableUntilDate && (
+                  <button type="button" onClick={() => updateConfig({ availableUntilDate: null })} className="text-xs text-gray-500 hover:text-gray-700">クリア</button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">指定すると、この日付までしか予約枠が表示されません（「最長予約」とAND条件）。空欄なら制限なし。</p>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">枠の表示間隔</label>
