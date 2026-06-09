@@ -1,11 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import type { Tag } from '@line-crm/shared'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 import FriendInfoPanel from '@/components/friends/friend-info-panel'
 import { useAccount } from '@/lib/account-context'
+import { withGroup } from '@/lib/format-group'
 
 interface Chat {
   id: string
@@ -79,8 +82,12 @@ const ccPrompts = [
   },
 ]
 
-export default function ChatsPage() {
+function ChatsPage() {
   const [chats, setChats] = useState<Chat[]>([])
+  const [allTags, setAllTags] = useState<Tag[]>([])
+  const [selectedTagId, setSelectedTagId] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
   const [chatDetail, setChatDetail] = useState<ChatDetail | null>(null)
   const [infoPanelOpen, setInfoPanelOpen] = useState(false)
@@ -95,6 +102,8 @@ export default function ChatsPage() {
   const [savingNotes, setSavingNotes] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const { selectedAccount } = useAccount()
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   const loadChats = useCallback(async () => {
     setLoading(true)
@@ -103,6 +112,8 @@ export default function ChatsPage() {
       const params: Record<string, string> = {}
       if (statusFilter !== 'all') params.status = statusFilter
       if (selectedAccount) params.lineAccountId = selectedAccount.id
+      if (selectedTagId) params.tagId = selectedTagId
+      if (searchQuery) params.q = searchQuery
       const res = await api.chats.list(params)
       if (res.success) {
         setChats(res.data as unknown as Chat[])
@@ -114,7 +125,7 @@ export default function ChatsPage() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, selectedAccount])
+  }, [statusFilter, selectedAccount, selectedTagId, searchQuery])
 
   const loadChatDetail = useCallback(async (chatId: string) => {
     setDetailLoading(true)
@@ -143,6 +154,19 @@ export default function ChatsPage() {
     }
   }, [])
 
+  // タグ一覧（絞り込み用）。アカウント切替で再取得し、選択中タグはリセット。
+  useEffect(() => {
+    setSelectedTagId('')
+    const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
+    api.tags.list(params).then((res) => { if (res.success) setAllTags(res.data) }).catch(() => {})
+  }, [selectedAccount])
+
+  // 名前検索のデバウンス（入力停止から300ms後に確定）
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
   useEffect(() => {
     setSelectedChatId(null)
   }, [selectedAccount])
@@ -150,6 +174,16 @@ export default function ChatsPage() {
   useEffect(() => {
     loadChats()
   }, [loadChats])
+
+  // 友だち管理画面から ?friendId=xxx で遷移してきた場合、該当チャットを開く
+  useEffect(() => {
+    const friendId = searchParams.get('friendId')
+    if (!friendId) return
+    api.chats.byFriend(friendId)
+      .then((res) => { if (res.success) setSelectedChatId(res.data.id) })
+      .catch(() => {})
+      .finally(() => { router.replace('/chats') })
+  }, [searchParams, router])
 
   // Auto-scroll to bottom when chat is opened or new messages arrive
   useEffect(() => {
@@ -238,6 +272,43 @@ export default function ChatsPage() {
       <div className="flex gap-4 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
         {/* Left Panel: Chat List */}
         <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
+          {/* Search + Tag filter */}
+          <div className="p-2.5 border-b border-gray-200 space-y-2">
+            <div className="relative">
+              <svg className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" />
+              </svg>
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => { setSearchInput(e.target.value); setSelectedChatId(null) }}
+                placeholder="名前で検索..."
+                className="w-full text-sm border border-gray-300 rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              {searchInput && (
+                <button
+                  onClick={() => { setSearchInput(''); setSelectedChatId(null) }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label="検索をクリア"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <select
+              value={selectedTagId}
+              onChange={(e) => { setSelectedTagId(e.target.value); setSelectedChatId(null) }}
+              className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">すべてのタグ</option>
+              {allTags.map((tag) => (
+                <option key={tag.id} value={tag.id}>{withGroup(tag.name, tag.groupName)}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Status Filter Tabs */}
           <div className="flex border-b border-gray-200">
             {statusFilters.map((filter) => (
@@ -553,5 +624,13 @@ export default function ChatsPage() {
       </div>
       <CcPromptButton prompts={ccPrompts} />
     </div>
+  )
+}
+
+export default function ChatsPageWrapper() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-sm text-gray-400">読み込み中...</div>}>
+      <ChatsPage />
+    </Suspense>
   )
 }

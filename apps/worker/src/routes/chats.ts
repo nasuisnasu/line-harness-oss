@@ -7,8 +7,10 @@ import {
   deleteOperator,
   getChats,
   getChatById,
+  getChatByFriendId,
   createChat,
   updateChat,
+  getLineAccountById,
   jstNow,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
@@ -81,6 +83,8 @@ chats.get('/api/chats', async (c) => {
     const status = c.req.query('status') ?? undefined;
     const operatorId = c.req.query('operatorId') ?? undefined;
     const lineAccountId = c.req.query('lineAccountId') ?? undefined;
+    const tagId = c.req.query('tagId') ?? undefined;
+    const q = c.req.query('q')?.trim() || undefined;
 
     // JOIN friends to get display_name, picture_url, and account filter
     let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id
@@ -100,6 +104,14 @@ chats.get('/api/chats', async (c) => {
     if (operatorId) {
       conditions.push('c.operator_id = ?');
       bindings.push(operatorId);
+    }
+    if (tagId) {
+      conditions.push('EXISTS (SELECT 1 FROM friend_tags ft WHERE ft.friend_id = c.friend_id AND ft.tag_id = ?)');
+      bindings.push(tagId);
+    }
+    if (q) {
+      conditions.push('f.display_name LIKE ?');
+      bindings.push(`%${q}%`);
     }
 
     if (conditions.length > 0) {
@@ -177,6 +189,26 @@ chats.get('/api/chats/:id', async (c) => {
   }
 });
 
+// 友だちIDからチャットを取得（なければ作成）— 友だち管理画面からチャットを開く用
+chats.get('/api/chats/by-friend/:friendId', async (c) => {
+  try {
+    const friendId = c.req.param('friendId');
+    const friend = await c.env.DB
+      .prepare(`SELECT id FROM friends WHERE id = ?`)
+      .bind(friendId)
+      .first<{ id: string }>();
+    if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+
+    let chat = await getChatByFriendId(c.env.DB, friendId);
+    if (!chat) chat = await createChat(c.env.DB, { friendId });
+
+    return c.json({ success: true, data: { id: chat.id, friendId: chat.friend_id, status: chat.status } });
+  } catch (err) {
+    console.error('GET /api/chats/by-friend/:friendId error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 chats.post('/api/chats', async (c) => {
   try {
     const body = await c.req.json<{ friendId: string; operatorId?: string }>();
@@ -220,18 +252,28 @@ chats.post('/api/chats/:id/send', async (c) => {
     const friend = await c.env.DB
       .prepare(`SELECT * FROM friends WHERE id = ?`)
       .bind(chat.friend_id)
-      .first<{ id: string; line_user_id: string }>();
+      .first<{ id: string; line_user_id: string; line_account_id: string | null }>();
     if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
 
-    // LINE APIでメッセージ送信
+    // LINE APIでメッセージ送信（友達のアカウントに紐づいたトークンを使用）
     const { LineClient } = await import('@line-crm/line-sdk');
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    let token = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (friend.line_account_id) {
+      const account = await getLineAccountById(c.env.DB, friend.line_account_id);
+      if (account) token = account.channel_access_token;
+    }
+    const lineClient = new LineClient(token);
     const messageType = body.messageType ?? 'text';
 
+    const { applyTrackingLinks } = await import('../services/step-delivery.js');
+    const sendContent = c.env.TRACKING_BASE_URL
+      ? applyTrackingLinks(body.content, c.env.TRACKING_BASE_URL, friend.id)
+      : body.content;
+
     if (messageType === 'text') {
-      await lineClient.pushTextMessage(friend.line_user_id, body.content);
+      await lineClient.pushTextMessage(friend.line_user_id, sendContent);
     } else if (messageType === 'flex') {
-      const contents = JSON.parse(body.content);
+      const contents = JSON.parse(sendContent);
       await lineClient.pushFlexMessage(friend.line_user_id, 'Message', contents);
     }
 
