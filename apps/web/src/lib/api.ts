@@ -78,8 +78,14 @@ export const api = {
         '/api/friends/count' + (params ? '?' + new URLSearchParams(params as Record<string, string>) : '')
       ),
     dailyStats: (params?: { lineAccountId?: string; days?: number; eventId?: string }) =>
-      fetchApi<ApiResponse<{ date: string; added: number; blocked: number; cumulative: number; bookings: number }[]>>(
+      fetchApi<ApiResponse<{ date: string; added: number; blocked: number; cumulative: number; bookings: number; paymentSum: number }[]>>(
         '/api/friends/daily-stats' + (params ? '?' + new URLSearchParams(
+          Object.fromEntries(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
+        ) : '')
+      ),
+    lifetimeSummary: (params?: { lineAccountId?: string; eventId?: string }) =>
+      fetchApi<ApiResponse<{ friendsAdded: number; bookings: number; paymentSum: number }>>(
+        '/api/friends/lifetime-summary' + (params ? '?' + new URLSearchParams(
           Object.fromEntries(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
         ) : '')
       ),

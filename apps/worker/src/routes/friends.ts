@@ -161,12 +161,28 @@ friends.get('/api/friends/daily-stats', async (c) => {
       .bind(...bookingBind)
       .all<{ day: string; bookings: number }>();
 
+    // 日別の売上（friend_payments.paid_at で集計）。lineAccountId で絞り込み可能。
+    const paymentConditions: string[] = ['1=1'];
+    const paymentBind: unknown[] = [];
+    if (lineAccountId) { paymentConditions.push('f.line_account_id = ?'); paymentBind.push(lineAccountId); }
+    const paymentRows = await c.env.DB
+      .prepare(
+        `SELECT substr(fp.paid_at, 1, 10) as day, SUM(fp.amount) as amount
+         FROM friend_payments fp
+         JOIN friends f ON f.id = fp.friend_id
+         WHERE ${paymentConditions.join(' AND ')}
+         GROUP BY substr(fp.paid_at, 1, 10)`,
+      )
+      .bind(...paymentBind)
+      .all<{ day: string; amount: number }>();
+
     const addedMap = new Map(addedRows.results.map((r) => [r.day, r.added]));
     const blockedMap = new Map(blockedRows.results.map((r) => [r.day, r.blocked]));
     const bookingsMap = new Map(bookingRows.results.map((r) => [r.day, r.bookings]));
+    const paymentsMap = new Map(paymentRows.results.map((r) => [r.day, r.amount]));
 
     // 過去 `days` 日分の日付リスト（JST基準で本日まで）
-    const result: { date: string; added: number; blocked: number; cumulative: number; bookings: number }[] = [];
+    const result: { date: string; added: number; blocked: number; cumulative: number; bookings: number; paymentSum: number }[] = [];
     const dateList: string[] = [];
     const today = new Date(Date.now() + 9 * 60 * 60_000); // JST
     for (let i = days - 1; i >= 0; i--) {
@@ -189,13 +205,66 @@ friends.get('/api/friends/daily-stats', async (c) => {
       const added = addedMap.get(date) ?? 0;
       const blocked = blockedMap.get(date) ?? 0;
       const bookings = bookingsMap.get(date) ?? 0;
+      const paymentSum = paymentsMap.get(date) ?? 0;
       cumulative += added - blocked;
-      result.push({ date, added, blocked, cumulative, bookings });
+      result.push({ date, added, blocked, cumulative, bookings, paymentSum });
     }
 
     return c.json({ success: true, data: result });
   } catch (err) {
     console.error('GET /api/friends/daily-stats error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// GET /api/friends/lifetime-summary - 累計の友達追加・申込み・売上
+friends.get('/api/friends/lifetime-summary', async (c) => {
+  try {
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
+    const eventId = c.req.query('eventId') ?? null;
+
+    const accountFilter = lineAccountId ? 'WHERE line_account_id = ?' : '';
+    const accountBind = lineAccountId ? [lineAccountId] : [];
+
+    // 累計の友達追加
+    const friendsAddedRow = await c.env.DB
+      .prepare(`SELECT COUNT(*) as cnt FROM friends ${accountFilter}`)
+      .bind(...accountBind)
+      .first<{ cnt: number }>();
+    const friendsAdded = friendsAddedRow?.cnt ?? 0;
+
+    // 累計の申込み（confirmed のみ）
+    const bookingConditions: string[] = [`b.status = 'confirmed'`];
+    const bookingBind: unknown[] = [];
+    if (lineAccountId) { bookingConditions.push('e.line_account_id = ?'); bookingBind.push(lineAccountId); }
+    if (eventId) { bookingConditions.push('b.app_event_id = ?'); bookingBind.push(eventId); }
+    const bookingsRow = await c.env.DB
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM calendar_bookings b
+         JOIN events e ON e.id = b.app_event_id
+         WHERE ${bookingConditions.join(' AND ')}`,
+      )
+      .bind(...bookingBind)
+      .first<{ cnt: number }>();
+    const bookings = bookingsRow?.cnt ?? 0;
+
+    // 累計の売上
+    const paymentConditions: string[] = ['1=1'];
+    const paymentBind: unknown[] = [];
+    if (lineAccountId) { paymentConditions.push('f.line_account_id = ?'); paymentBind.push(lineAccountId); }
+    const paymentRow = await c.env.DB
+      .prepare(
+        `SELECT COALESCE(SUM(fp.amount), 0) as total FROM friend_payments fp
+         JOIN friends f ON f.id = fp.friend_id
+         WHERE ${paymentConditions.join(' AND ')}`,
+      )
+      .bind(...paymentBind)
+      .first<{ total: number }>();
+    const paymentSum = paymentRow?.total ?? 0;
+
+    return c.json({ success: true, data: { friendsAdded, bookings, paymentSum } });
+  } catch (err) {
+    console.error('GET /api/friends/lifetime-summary error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

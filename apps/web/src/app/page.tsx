@@ -326,7 +326,7 @@ export default function DashboardPage() {
   )
 }
 
-interface DailyStatRow { date: string; added: number; blocked: number; cumulative: number; bookings: number }
+interface DailyStatRow { date: string; added: number; blocked: number; cumulative: number; bookings: number; paymentSum: number }
 
 function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
   const [rows, setRows] = useState<DailyStatRow[]>([])
@@ -335,6 +335,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
   const [eventId, setEventId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [lifetime, setLifetime] = useState<{ friendsAdded: number; bookings: number; paymentSum: number } | null>(null)
 
   // 申込み絞り込み用のイベント一覧（相談系イベント）。アカウント切替で選択リセット。
   useEffect(() => {
@@ -361,8 +362,23 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
     return () => { cancelled = true }
   }, [lineAccountId, days, eventId])
 
+  // LIFETIME 合計（期間切り替えに影響しないので別 effect）
+  useEffect(() => {
+    let cancelled = false
+    api.friends
+      .lifetimeSummary({ ...(lineAccountId ? { lineAccountId } : {}), ...(eventId ? { eventId } : {}) })
+      .then((res) => {
+        if (cancelled) return
+        if (res.success) setLifetime(res.data)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [lineAccountId, eventId])
+
   const totalAdded = rows.reduce((s, r) => s + r.added, 0)
   const totalBookings = rows.reduce((s, r) => s + r.bookings, 0)
+  const totalPayment = rows.reduce((s, r) => s + (r.paymentSum ?? 0), 0)
+  const formatYen = (n: number) => '¥' + n.toLocaleString()
 
   const formatDate = (iso: string) => {
     const d = new Date(iso + 'T00:00:00+09:00')
@@ -409,6 +425,29 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
             <span className="text-xs text-gray-500">期間の申込み</span>
             <span className="text-base font-bold text-blue-600">{totalBookings}</span>
           </div>
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-amber-50">
+            <span className="text-xs text-gray-500">期間の売上</span>
+            <span className="text-base font-bold text-amber-700">{formatYen(totalPayment)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* LIFETIME サマリー */}
+      {lifetime && (
+        <div className="flex gap-3 mb-3 flex-wrap items-center">
+          <span className="text-[10px] tracking-[0.2em] font-bold text-gray-400">LIFETIME</span>
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
+            <span className="text-xs text-gray-500">累計の友達追加</span>
+            <span className="text-base font-bold text-gray-700">{lifetime.friendsAdded.toLocaleString()}</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
+            <span className="text-xs text-gray-500">累計の申込み</span>
+            <span className="text-base font-bold text-gray-700">{lifetime.bookings.toLocaleString()}</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
+            <span className="text-xs text-gray-500">累計の売上</span>
+            <span className="text-base font-bold text-gray-700">{formatYen(lifetime.paymentSum)}</span>
+          </div>
         </div>
       )}
 
@@ -421,6 +460,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
               <th className="text-left px-3 py-2 font-semibold">日付</th>
               <th className="text-right px-3 py-2 font-semibold">新規追加</th>
               <th className="text-right px-3 py-2 font-semibold">申込み</th>
+              <th className="text-right px-3 py-2 font-semibold">売上</th>
               <th className="text-right px-3 py-2 font-semibold">ブロック</th>
               <th className="text-right px-3 py-2 font-semibold">累計（有効）</th>
             </tr>
@@ -432,6 +472,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
                   <td className="px-3 py-2"><div className="h-3 bg-gray-100 rounded w-16 animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-12 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-10 ml-auto animate-pulse" /></td>
                 </tr>
@@ -445,6 +486,9 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
                   </td>
                   <td className="px-3 py-2 text-right">
                     {r.bookings > 0 ? <span className="text-blue-600 font-semibold">{r.bookings}</span> : <span className="text-gray-300">0</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {(r.paymentSum ?? 0) > 0 ? <span className="text-amber-700 font-semibold">{formatYen(r.paymentSum)}</span> : <span className="text-gray-300">¥0</span>}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {r.blocked > 0 ? <span className="text-red-500 font-semibold">-{r.blocked}</span> : <span className="text-gray-300">0</span>}
