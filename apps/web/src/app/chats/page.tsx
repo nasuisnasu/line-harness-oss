@@ -223,7 +223,8 @@ function ChatsPage() {
       }
       if (attachment) {
         if (attachment.kind === 'image') {
-          await api.chats.send(selectedChatId, { content: attachment.url, messageType: 'image' })
+          const imageJson = JSON.stringify({ originalContentUrl: attachment.url, previewImageUrl: attachment.url })
+          await api.chats.send(selectedChatId, { content: imageJson, messageType: 'image' })
         } else {
           // PDF等は LINE がプッシュ非対応のため、リンクをテキストで送る
           await api.chats.send(selectedChatId, { content: `📎 ${attachment.name}\n${attachment.url}` })

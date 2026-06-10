@@ -276,9 +276,14 @@ chats.post('/api/chats/:id/send', async (c) => {
       const contents = JSON.parse(sendContent);
       await lineClient.pushFlexMessage(friend.line_user_id, 'Message', contents);
     } else if (messageType === 'image') {
-      // content には画像URL（R2 経由の公開URL）を入れる前提
+      // content は JSON {originalContentUrl, previewImageUrl} 形式
+      const parsed = JSON.parse(sendContent) as { originalContentUrl: string; previewImageUrl?: string };
       await lineClient.pushMessage(friend.line_user_id, [
-        { type: 'image', originalContentUrl: sendContent, previewImageUrl: sendContent },
+        {
+          type: 'image',
+          originalContentUrl: parsed.originalContentUrl,
+          previewImageUrl: parsed.previewImageUrl || parsed.originalContentUrl,
+        },
       ]);
     }
 
