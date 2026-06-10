@@ -275,6 +275,11 @@ chats.post('/api/chats/:id/send', async (c) => {
     } else if (messageType === 'flex') {
       const contents = JSON.parse(sendContent);
       await lineClient.pushFlexMessage(friend.line_user_id, 'Message', contents);
+    } else if (messageType === 'image') {
+      // content には画像URL（R2 経由の公開URL）を入れる前提
+      await lineClient.pushMessage(friend.line_user_id, [
+        { type: 'image', originalContentUrl: sendContent, previewImageUrl: sendContent },
+      ]);
     }
 
     // メッセージログに記録

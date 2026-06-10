@@ -98,6 +98,9 @@ function ChatsPage() {
   const [error, setError] = useState('')
   const [messageContent, setMessageContent] = useState('')
   const [sending, setSending] = useState(false)
+  const [attachment, setAttachment] = useState<{ kind: 'image' | 'file'; url: string; name: string } | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [notes, setNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
@@ -209,12 +212,25 @@ function ChatsPage() {
   }
 
   const handleSendMessage = async () => {
-    if (!selectedChatId || !messageContent.trim()) return
+    if (!selectedChatId) return
+    const text = messageContent.trim()
+    if (!text && !attachment) return
     setSending(true)
     try {
-      await api.chats.send(selectedChatId, { content: messageContent.trim() })
+      // 添付ファイルがあれば先に送る（テキスト→添付の順だと、画像下にコメントが見える形）
+      if (text) {
+        await api.chats.send(selectedChatId, { content: text })
+      }
+      if (attachment) {
+        if (attachment.kind === 'image') {
+          await api.chats.send(selectedChatId, { content: attachment.url, messageType: 'image' })
+        } else {
+          // PDF等は LINE がプッシュ非対応のため、リンクをテキストで送る
+          await api.chats.send(selectedChatId, { content: `📎 ${attachment.name}\n${attachment.url}` })
+        }
+      }
       setMessageContent('')
-      // textareaの高さをリセット
+      setAttachment(null)
       const ta = document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="メッセージを入力"]')
       if (ta) ta.style.height = 'auto'
       loadChatDetail(selectedChatId)
@@ -223,6 +239,39 @@ function ChatsPage() {
       setError('メッセージの送信に失敗しました。')
     } finally {
       setSending(false)
+    }
+  }
+
+  const handlePickFile = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // 同じファイル再選択も拾えるように
+    if (!file) return
+    setUploading(true)
+    try {
+      const isImage = file.type.startsWith('image/')
+      if (isImage) {
+        const res = await api.uploads.image(file)
+        if (res.success && res.data) {
+          setAttachment({ kind: 'image', url: res.data.url, name: file.name })
+        } else {
+          setError(res.error || '画像のアップロードに失敗しました。')
+        }
+      } else {
+        const res = await api.uploads.file(file, selectedAccount?.id ?? null)
+        if (res.success && res.data) {
+          setAttachment({ kind: 'file', url: res.data.url, name: file.name })
+        } else {
+          setError(res.error || 'ファイルのアップロードに失敗しました。')
+        }
+      }
+    } catch {
+      setError('アップロードに失敗しました。')
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -592,7 +641,33 @@ function ChatsPage() {
 
               {/* Send Message Form */}
               <div className="px-4 py-3 border-t border-gray-200">
+                {attachment && (
+                  <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs">
+                    {attachment.kind === 'image' ? (
+                      <img src={attachment.url} alt={attachment.name} className="w-10 h-10 object-cover rounded border border-gray-200" />
+                    ) : (
+                      <span className="w-10 h-10 flex items-center justify-center bg-white border border-gray-200 rounded text-base">📎</span>
+                    )}
+                    <span className="flex-1 truncate text-gray-700">{attachment.name}</span>
+                    <button onClick={() => setAttachment(null)} className="text-gray-400 hover:text-gray-700">✕</button>
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
+                    onChange={handleFileChosen}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={handlePickFile}
+                    disabled={uploading || sending}
+                    title="ファイル添付（画像・PDF）"
+                    className="px-3 py-2 text-base border border-gray-300 rounded-lg bg-white hover:bg-gray-50 disabled:opacity-50 shrink-0"
+                  >
+                    {uploading ? '…' : '📎'}
+                  </button>
                   <textarea
                     value={messageContent}
                     onChange={(e) => {
@@ -610,7 +685,7 @@ function ChatsPage() {
                   />
                   <button
                     onClick={handleSendMessage}
-                    disabled={sending || !messageContent.trim()}
+                    disabled={sending || uploading || (!messageContent.trim() && !attachment)}
                     className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                     style={{ backgroundColor: '#06C755' }}
                   >
