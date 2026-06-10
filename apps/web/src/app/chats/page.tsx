@@ -255,14 +255,14 @@ function ChatsPage() {
       const isImage = file.type.startsWith('image/')
       if (isImage) {
         const res = await api.uploads.image(file)
-        if (res.success && res.data) {
+        if (res.success) {
           setAttachment({ kind: 'image', url: res.data.url, name: file.name })
         } else {
           setError(res.error || '画像のアップロードに失敗しました。')
         }
       } else {
         const res = await api.uploads.file(file, selectedAccount?.id ?? null)
-        if (res.success && res.data) {
+        if (res.success) {
           setAttachment({ kind: 'file', url: res.data.url, name: file.name })
         } else {
           setError(res.error || 'ファイルのアップロードに失敗しました。')
