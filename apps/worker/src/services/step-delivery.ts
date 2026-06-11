@@ -3,29 +3,26 @@ import {
   getScenarioSteps,
   advanceFriendScenario,
   completeFriendScenario,
+  computeStepNextDeliveryAt,
   getFriendById,
   getLineAccountById,
+  getRichMenuById,
   jstNow,
 } from '@line-crm/db';
-import { LineClient } from '@line-crm/line-sdk';
-import type { Message } from '@line-crm/line-sdk';
-import { jitterDeliveryTime, addJitter, sleep } from './stealth.js';
+import { LineClient, buttonsTemplate } from '@line-crm/line-sdk';
+import type { Message, TemplateAction } from '@line-crm/line-sdk';
 
 export async function processStepDeliveries(
   db: D1Database,
   lineClient: LineClient,
+  trackingBaseUrl?: string,
 ): Promise<void> {
   const now = jstNow();
   const dueFriendScenarios = await getFriendScenariosDueForDelivery(db, now);
 
-  for (let i = 0; i < dueFriendScenarios.length; i++) {
-    const fs = dueFriendScenarios[i];
+  for (const fs of dueFriendScenarios) {
     try {
-      // Stealth: add small random delay between deliveries to avoid burst patterns
-      if (i > 0) {
-        await sleep(addJitter(50, 200));
-      }
-      await processSingleDelivery(db, lineClient, fs);
+      await processSingleDelivery(db, lineClient, fs, trackingBaseUrl);
     } catch (err) {
       console.error(`Error processing friend_scenario ${fs.id}:`, err);
       // Continue with next one
@@ -44,6 +41,7 @@ async function processSingleDelivery(
     status: string;
     next_delivery_at: string | null;
   },
+  trackingBaseUrl?: string,
 ): Promise<void> {
   // Get all steps for this scenario
   const steps = await getScenarioSteps(db, fs.scenario_id);
@@ -70,10 +68,7 @@ async function processSingleDelivery(
         // Jump to the specified step_order on failure
         const jumpStep = steps.find((s) => s.step_order === currentStep.next_step_on_false);
         if (jumpStep) {
-          const nextDate = new Date(Date.now() + 9 * 60 * 60_000);
-          nextDate.setMinutes(nextDate.getMinutes() + jumpStep.delay_minutes);
-          const jitteredDate = jitterDeliveryTime(nextDate);
-          await advanceFriendScenario(db, fs.id, currentStep.step_order, jitteredDate.toISOString().slice(0, -1) + '+09:00');
+          await advanceFriendScenario(db, fs.id, currentStep.step_order, computeStepNextDeliveryAt(jumpStep));
           return;
         }
       }
@@ -81,10 +76,7 @@ async function processSingleDelivery(
       const nextIndex = steps.indexOf(currentStep) + 1;
       if (nextIndex < steps.length) {
         const nextStep = steps[nextIndex];
-        const nextDate = new Date(Date.now() + 9 * 60 * 60_000);
-        nextDate.setMinutes(nextDate.getMinutes() + nextStep.delay_minutes);
-        const jitteredDate = jitterDeliveryTime(nextDate);
-        await advanceFriendScenario(db, fs.id, currentStep.step_order, jitteredDate.toISOString().slice(0, -1) + '+09:00');
+        await advanceFriendScenario(db, fs.id, currentStep.step_order, computeStepNextDeliveryAt(nextStep));
       } else {
         await completeFriendScenario(db, fs.id);
       }
@@ -94,8 +86,8 @@ async function processSingleDelivery(
 
   // Get friend's LINE user ID
   const friend = await getFriendById(db, fs.friend_id);
-  if (!friend || !friend.is_following) {
-    // Friend unfollowed or not found — complete the scenario
+  if (!friend || !friend.is_following || friend.is_blocked) {
+    // Friend unfollowed, not found, or blocked from all deliveries — complete the scenario
     await completeFriendScenario(db, fs.id);
     return;
   }
@@ -107,23 +99,82 @@ async function processSingleDelivery(
     if (account) client = new LineClient(account.channel_access_token);
   }
 
-  // Build and send the message (with variable substitution)
-  const content = applyVars(currentStep.message_content, { name: friend.display_name ?? '' });
-  const message = buildMessage(currentStep.message_type, content);
-  await client.pushMessage(friend.line_user_id, [message]);
+  // メッセージタイプが 'richmenu' なら、メッセージ送信せずリッチメニューをLink/Unlinkして次へ
+  if (currentStep.message_type === 'richmenu') {
+    try {
+      if (currentStep.rich_menu_id) {
+        const rm = await getRichMenuById(db, currentStep.rich_menu_id);
+        if (rm?.line_richmenu_id) {
+          await client.linkRichMenuToUser(friend.line_user_id, rm.line_richmenu_id);
+        }
+      } else {
+        // rich_menu_id が空ならアンリンク
+        await client.unlinkRichMenuFromUser(friend.line_user_id);
+      }
+    } catch (e) {
+      console.error('Rich menu switch error:', e);
+    }
+    // ログだけ残して次のステップへ
+    const logId = crypto.randomUUID();
+    const now = jstNow();
+    await db
+      .prepare(
+        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+         VALUES (?, ?, 'outgoing', 'richmenu', ?, NULL, ?, ?)`,
+      )
+      .bind(logId, friend.id, currentStep.rich_menu_id ?? '', currentStep.id, now)
+      .run();
+    await advanceFriendScenario(db, fs.id, currentStep.step_order, null);
+    return;
+  }
 
-  // Log outgoing message
-  const logId = crypto.randomUUID();
+  // Collect a "burst" of consecutive immediate push-type steps so they all
+  // arrive in a single LINE pushMessage call (LINE supports up to 5 messages
+  // per push and renders them as a single grouped delivery). Without this,
+  // step 1 → step 2 with delay_minutes=0 still landed with a small visible
+  // gap because each step issued its own API call.
+  const currentIndex = steps.indexOf(currentStep);
+  const batch = [currentStep];
+  let cursor = currentIndex + 1;
+  while (cursor < steps.length && batch.length < 5) {
+    const candidate = steps[cursor];
+    const candidateImmediate =
+      candidate.delay_mode === 'relative' &&
+      (candidate.delay_minutes ?? 0) === 0 &&
+      (candidate.delay_days ?? 0) === 0;
+    if (!candidateImmediate) break;
+    // richmenu / conditional steps need their own logic (link/unlink, eval),
+    // so the batch ends just before them.
+    if (candidate.message_type === 'richmenu') break;
+    if (candidate.condition_type) break;
+    batch.push(candidate);
+    cursor++;
+  }
+
+  // Build all messages in the burst, applying var substitution + tracking link
+  // rewrites per-step.
+  const messages = batch.map((step) => {
+    let content = applyVars(step.message_content, { name: friend.display_name ?? '', friendId: friend.id });
+    if (trackingBaseUrl) {
+      content = applyTrackingLinks(content, trackingBaseUrl, friend.id);
+    }
+    return buildMessage(step.message_type, content);
+  });
+  await client.pushMessage(friend.line_user_id, messages);
+
+  // Log every step in the burst as outgoing.
   const now = jstNow();
-  await db
-    .prepare(
-      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
-    )
-    .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, now)
-    .run();
+  for (const step of batch) {
+    await db
+      .prepare(
+        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+         VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), friend.id, step.message_type, step.message_content, step.id, now)
+      .run();
+  }
 
-  // Ensure chat room exists and is up-to-date
+  // Ensure chat room exists and is up-to-date (single update for the burst).
   const existing = await db.prepare(`SELECT id FROM chats WHERE friend_id = ?`).bind(friend.id).first<{ id: string }>();
   if (existing) {
     await db.prepare(`UPDATE chats SET last_message_at = ?, updated_at = ? WHERE id = ?`).bind(now, now, existing.id).run();
@@ -132,18 +183,32 @@ async function processSingleDelivery(
       .bind(crypto.randomUUID(), friend.id, now, now, now).run();
   }
 
-  // Determine next step (find the step after currentStep in the sorted list)
-  const currentIndex = steps.indexOf(currentStep);
-  const nextStep = currentIndex + 1 < steps.length ? steps[currentIndex + 1] : null;
+  const lastStep = batch[batch.length - 1];
+  const afterLast = cursor < steps.length ? steps[cursor] : null;
 
-  if (nextStep) {
-    // Schedule next delivery with stealth jitter
-    const nextDeliveryDate = new Date(Date.now() + 9 * 60 * 60_000);
-    nextDeliveryDate.setMinutes(nextDeliveryDate.getMinutes() + nextStep.delay_minutes);
-    const jitteredDate = jitterDeliveryTime(nextDeliveryDate);
-    await advanceFriendScenario(db, fs.id, currentStep.step_order, jitteredDate.toISOString().slice(0, -1) + '+09:00');
+  if (afterLast) {
+    const nextDeliveryStr = computeStepNextDeliveryAt(afterLast);
+    await advanceFriendScenario(db, fs.id, lastStep.step_order, nextDeliveryStr);
+
+    // If the next step is also immediate but couldn't join the batch (richmenu
+    // / conditional), recurse so it doesn't wait for the next cron tick.
+    const afterLastImmediate =
+      afterLast.delay_mode === 'relative' &&
+      (afterLast.delay_minutes ?? 0) === 0 &&
+      (afterLast.delay_days ?? 0) === 0;
+    if (afterLastImmediate) {
+      await processSingleDelivery(
+        db,
+        client,
+        {
+          ...fs,
+          current_step_order: lastStep.step_order,
+          next_delivery_at: nextDeliveryStr,
+        },
+        trackingBaseUrl,
+      );
+    }
   } else {
-    // This was the last step
     await completeFriendScenario(db, fs.id);
   }
 }
@@ -197,6 +262,28 @@ export function applyVars(content: string, vars: Record<string, string>): string
   return content.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? `{${key}}`);
 }
 
+/**
+ * メッセージ内の {link:linkId} を per-friend のトラッキングURLに置換する。
+ * baseUrl 例: https://line-crm-worker.readash-crm.workers.dev
+ * friendId が null の場合は ?f= を付けない（合計クリック数のみカウントされる）。
+ */
+export function applyTrackingLinks(
+  content: string,
+  baseUrl: string,
+  friendId: string | null,
+): string {
+  return content.replace(/\{link:([a-zA-Z0-9-]+)\}/g, (_, linkId: string) => {
+    return friendId
+      ? `${baseUrl}/t/${linkId}?f=${friendId}`
+      : `${baseUrl}/t/${linkId}`;
+  });
+}
+
+/** メッセージ内に {link:xxx} が含まれるかどうか */
+export function hasTrackingLinks(content: string): boolean {
+  return /\{link:[a-zA-Z0-9-]+\}/.test(content);
+}
+
 export function buildMessage(messageType: string, messageContent: string): Message {
   if (messageType === 'text') {
     return { type: 'text', text: messageContent };
@@ -229,6 +316,33 @@ export function buildMessage(messageType: string, messageContent: string): Messa
     }
   }
 
+  if (messageType === 'buttons') {
+    try {
+      const parsed = JSON.parse(messageContent) as ButtonsTemplateContent;
+      return buttonsTemplate({
+        altText: parsed.altText || parsed.title || parsed.text || 'メッセージ',
+        text: parsed.text,
+        title: parsed.title,
+        thumbnailImageUrl: parsed.thumbnailImageUrl,
+        actions: parsed.actions as TemplateAction[],
+      });
+    } catch {
+      return { type: 'text', text: messageContent };
+    }
+  }
+
   // Fallback
   return { type: 'text', text: messageContent };
+}
+
+interface ButtonsTemplateContent {
+  thumbnailImageUrl?: string;
+  title?: string;
+  text: string;
+  altText?: string;
+  actions: Array<
+    | { type: 'message'; label: string; text: string }
+    | { type: 'uri'; label: string; uri: string }
+    | { type: 'postback'; label: string; data: string; displayText?: string }
+  >;
 }

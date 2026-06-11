@@ -17,18 +17,25 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/api/integrations/stripe/webhook' ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
-    path.match(/^\/api\/forms\/[^/]+$/) // GET form definition (public for LIFF)
+    path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
+    path.startsWith('/uploads/') || // Public R2 image proxy — LINE servers fetch these
+    path.startsWith('/api/public/') // Public LIFF endpoints (event booking etc.)
   ) {
     return next();
   }
 
+  // Bearer token (通常)
   const authHeader = c.req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
+  let token: string | null = null;
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.slice('Bearer '.length);
   }
+  // X-API-Key ヘッダ (multipart など)
+  if (!token) token = c.req.header('X-API-Key') ?? null;
+  // クエリパラメータ ?apiKey= (画像プレビューなど <img> タグ用)
+  if (!token) token = c.req.query('apiKey') ?? null;
 
-  const token = authHeader.slice('Bearer '.length);
-  if (token !== c.env.API_KEY) {
+  if (!token || token !== c.env.API_KEY) {
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 

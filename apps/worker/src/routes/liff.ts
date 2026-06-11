@@ -8,6 +8,8 @@ import {
   getEntryRouteByRefCode,
   recordRefTracking,
   addTagToFriend,
+  getEntryRouteTagIds,
+  upsertChatOnMessage,
   jstNow,
   getLineAccountById,
   getScenarios,
@@ -16,9 +18,12 @@ import {
   getScenarioSteps,
   advanceFriendScenario,
   completeFriendScenario,
+  toJstString,
+  getTemplateById,
 } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
-import { buildMessage, applyVars } from '../services/step-delivery.js';
+import { buildMessage, applyVars, applyTrackingLinks } from '../services/step-delivery.js';
+import { notifyScenarioEnrolled } from '../services/discord-notify.js';
 import type { Env } from '../index.js';
 
 const liffRoutes = new Hono<Env>();
@@ -36,7 +41,7 @@ const liffRoutes = new Hono<Env>();
  *   ?fbclid=xxx  — Meta Ads click ID
  *   ?utm_source=xxx, utm_medium, utm_campaign, utm_content, utm_term — UTM params
  */
-liffRoutes.get('/auth/line', (c) => {
+liffRoutes.get('/auth/line', async (c) => {
   const ref = c.req.query('ref') || '';
   const redirect = c.req.query('redirect') || '';
   const gclid = c.req.query('gclid') || '';
@@ -44,10 +49,39 @@ liffRoutes.get('/auth/line', (c) => {
   const utmSource = c.req.query('utm_source') || '';
   const utmMedium = c.req.query('utm_medium') || '';
   const utmCampaign = c.req.query('utm_campaign') || '';
-  const liffUrl = c.env.LIFF_URL;
+  let liffUrl = c.env.LIFF_URL;
   const channelId = c.env.LINE_LOGIN_CHANNEL_ID;
   const baseUrl = new URL(c.req.url).origin;
   const callbackUrl = `${baseUrl}/auth/callback`;
+
+  // Per-account LIFF routing: when the operator hits this with a ref, look
+  // up the entry-route's LINE OA and override LIFF_URL so the LIFF app
+  // that opens belongs to the right account. Without this, every entry-
+  // route falls back to the single LIFF_URL env var (currently 受験英語
+  // INSIDER) and clicks for 大学受験攻略 / 元英弱ニキ end up at "invalid
+  // liff id" because that LIFF doesn't recognise the friend.
+  if (ref) {
+    try {
+      const route = await c.env.DB
+        .prepare(`SELECT line_account_id FROM entry_routes WHERE ref_code = ? AND is_active = 1`)
+        .bind(ref)
+        .first<{ line_account_id: string | null }>();
+      if (route?.line_account_id) {
+        const ACCOUNT_LIFF_MAP: Record<string, string> = {
+          // d49a3a13… → 大学受験攻略 (LIFF 2009821004-brTkmVVK)
+          'd49a3a13-8169-4b25-a669-3c8a4f4f964d': 'https://liff.line.me/2009821004-brTkmVVK',
+          // 40adcb23… → 元英弱ニキ (LIFF 2006855304-UfNPHFOn)
+          '40adcb23-277b-4d9d-b6e2-92fde47d31fb': 'https://liff.line.me/2006855304-UfNPHFOn',
+          // 5185b739… → 受験英語 INSIDER (LIFF 2009506707-S01wyX6D)
+          '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e': 'https://liff.line.me/2009506707-S01wyX6D',
+        };
+        const accountLiff = ACCOUNT_LIFF_MAP[route.line_account_id];
+        if (accountLiff) liffUrl = accountLiff;
+      }
+    } catch (err) {
+      console.error('[/auth/line] entry-route LIFF resolution failed:', err);
+    }
+  }
 
   // Build LIFF URL with ref + ad params (for mobile → LINE app)
   const liffParams = new URLSearchParams();
@@ -236,12 +270,109 @@ liffRoutes.get('/auth/callback', async (c) => {
       });
 
       if (route) {
-        // Auto-tag the friend
-        if (route.tag_id) {
-          await addTagToFriend(db, friend.id, route.tag_id);
+        console.log(`[entry-route DEBUG] ref=${ref} friend=${friend.id} tag_id=${route.tag_id} scenario_id=${route.scenario_id}`);
+        // Auto-tag the friend — use the multi-tag join table; fall back to
+        // the legacy single-column tag_id if no rows were configured.
+        const autoTagIds = await getEntryRouteTagIds(db, route);
+        for (const tagId of autoTagIds) {
+          await addTagToFriend(db, friend.id, tagId);
         }
-        // Auto-enroll in scenario (scenario_id stored; enrollment handled by scenario engine)
-        // Future: call enrollFriendInScenario(db, friend.id, route.scenario_id) here
+        // Auto-enroll in the entry-route's scenario. Idempotent: skip when
+        // an active enrollment already exists so a re-tap of the same
+        // entry-route URL doesn't double-deliver step 0.
+        if (route.scenario_id) {
+          console.log(`[entry-route] step1: checking existing enrollment`);
+          const existingEnrollment = await db
+            .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
+            .bind(friend.id, route.scenario_id)
+            .first<{ id: string }>();
+          console.log(`[entry-route] step2: existingEnrollment=${!!existingEnrollment}`);
+          if (!existingEnrollment) {
+            try {
+              console.log(`[entry-route] step3: calling enrollFriendInScenario`);
+              const friendScenario = await enrollFriendInScenario(db, friend.id, route.scenario_id);
+              console.log(`[entry-route] step4: enrolled, status=${friendScenario.status}`);
+              await notifyScenarioEnrolled(c.env.DISCORD_WEBHOOK_URL, db, friend.id, route.scenario_id);
+
+              // Resolve the LINE account for this scenario so we can push
+              // the first step. Scenario rows store line_account_id; the
+              // entry-route can also override but we trust the scenario's
+              // own binding here for consistency with how broadcasts work.
+              const accountRow = await db
+                .prepare(`SELECT line_account_id FROM scenarios WHERE id = ?`)
+                .bind(route.scenario_id)
+                .first<{ line_account_id: string | null }>();
+              const accountId = accountRow?.line_account_id ?? null;
+              if (accountId && friendScenario.status === 'active') {
+                const account = await getLineAccountById(db, accountId);
+                const steps = await getScenarioSteps(db, route.scenario_id);
+                const firstStep = steps[0];
+                if (account && firstStep && firstStep.delay_minutes === 0) {
+                  try {
+                    let content = applyVars(firstStep.message_content, {
+                      name: friend.display_name ?? '',
+                      friendId: friend.id,
+                    });
+                    if (c.env.TRACKING_BASE_URL) {
+                      content = applyTrackingLinks(content, c.env.TRACKING_BASE_URL, friend.id);
+                    }
+                    const message = buildMessage(firstStep.message_type, content);
+                    const lineClient = new LineClient(account.channel_access_token);
+                    await lineClient.pushMessage(lineUserId, [message]);
+                    // Mirror the /api/liff/link path: log the outgoing
+                    // message so it shows up in the chat / messages_log UI.
+                    await db
+                      .prepare(
+                        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                         VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+                      )
+                      .bind(
+                        crypto.randomUUID(),
+                        friend.id,
+                        firstStep.message_type,
+                        content,
+                        firstStep.id,
+                        jstNow(),
+                      )
+                      .run();
+                    // Surface the friend in the operator chat list. Without
+                    // this, scenario-only friends never get a chats row and
+                    // are invisible in the chat UI.
+                    await upsertChatOnMessage(db, friend.id);
+
+                    // Advance the scenario state so the 5min cron job
+                    // doesn't re-deliver step 0. Without this, the
+                    // enrollment row's `current_step_order=0` +
+                    // `next_delivery_at<=now` makes the worker treat the
+                    // step as undelivered on every tick.
+                    const secondStep = steps[1] ?? null;
+                    if (secondStep) {
+                      // Use real UTC + toJstString to avoid the double +9h shift
+                      // that happened when we pre-shifted the Date here AND
+                      // toJstString shifted again internally.
+                      const nextDeliveryDate = new Date();
+                      nextDeliveryDate.setMinutes(
+                        nextDeliveryDate.getMinutes() + secondStep.delay_minutes,
+                      );
+                      await advanceFriendScenario(
+                        db,
+                        friendScenario.id,
+                        firstStep.step_order,
+                        toJstString(nextDeliveryDate),
+                      );
+                    } else {
+                      await completeFriendScenario(db, friendScenario.id);
+                    }
+                  } catch (err) {
+                    console.error('[entry-route] first step push failed:', err);
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('[entry-route] scenario enroll failed:', err);
+            }
+          }
+        }
       }
     }
 
@@ -309,7 +440,21 @@ liffRoutes.post('/api/liff/profile', async (c) => {
 });
 
 // POST /api/liff/link - link friend to user UUID (public, verified via LINE ID token)
+// Diagnostic endpoint for LIFF debugging — receives the bundle's URL
+// snapshot so we can see what the LIFF SDK actually delivered to the
+// page, even when the main link flow doesn't fire.
+liffRoutes.post('/api/liff/diagnostic', async (c) => {
+  try {
+    const body = await c.req.json<Record<string, unknown>>();
+    console.log('[LIFF diagnostic]', JSON.stringify(body));
+  } catch (err) {
+    console.error('[LIFF diagnostic] parse failed:', err);
+  }
+  return c.json({ success: true });
+});
+
 liffRoutes.post('/api/liff/link', async (c) => {
+  console.log('[LIFF link] entered v3');
   try {
     const body = await c.req.json<{
       idToken: string;
@@ -317,7 +462,14 @@ liffRoutes.post('/api/liff/link', async (c) => {
       ref?: string | null;
       alreadyFriend?: boolean;
       liffId?: string | null;
+      _debug?: { href?: string; search?: string; hash?: string };
     }>();
+    console.log(`[LIFF link] ref=${body.ref} alreadyFriend=${body.alreadyFriend} hasIdToken=${!!body.idToken}`);
+    if (body._debug) {
+      console.log(`[LIFF link DEBUG] href=${body._debug.href}`);
+      console.log(`[LIFF link DEBUG] search=${body._debug.search}`);
+      console.log(`[LIFF link DEBUG] hash=${body._debug.hash}`);
+    }
 
     if (!body.idToken) {
       return c.json({ success: false, error: 'idToken is required' }, 400);
@@ -372,14 +524,22 @@ liffRoutes.post('/api/liff/link', async (c) => {
         sourceUrl: null,
       });
 
-      if (route?.tag_id) {
-        await addTagToFriend(db, friend.id, route.tag_id);
-        // Derive lineAccountId from tag
-        const tagRow = await db
-          .prepare(`SELECT line_account_id FROM tags WHERE id = ?`)
-          .bind(route.tag_id)
-          .first<{ line_account_id: string | null }>();
-        lineAccountId = tagRow?.line_account_id ?? null;
+      if (route) {
+        const autoTagIds = await getEntryRouteTagIds(db, route);
+        for (const tagId of autoTagIds) {
+          await addTagToFriend(db, friend.id, tagId);
+        }
+        // Derive lineAccountId from the route directly (preferred) or fall
+        // back to looking up the first tag's account.
+        if (route.line_account_id) {
+          lineAccountId = route.line_account_id;
+        } else if (autoTagIds.length > 0) {
+          const tagRow = await db
+            .prepare(`SELECT line_account_id FROM tags WHERE id = ?`)
+            .bind(autoTagIds[0])
+            .first<{ line_account_id: string | null }>();
+          lineAccountId = tagRow?.line_account_id ?? null;
+        }
       }
       // Fallback: derive lineAccountId from scenario if tag didn't have it
       if (!lineAccountId && route?.scenario_id) {
@@ -396,6 +556,95 @@ liffRoutes.post('/api/liff/link', async (c) => {
           .prepare(`UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL`)
           .bind(lineAccountId, friend.id)
           .run();
+      }
+
+      // Auto-enroll in the entry-route's scenario, regardless of whether the
+      // user was already a friend. Previously this lived inside the
+      // `alreadyFriend` branch below, which meant new friends arriving via
+      // an entry-route had to wait on the LINE follow webhook to fire — and
+      // the webhook path doesn't read entry-route attribution, so newly-added
+      // friends silently skipped the scenario the operator picked.
+      // Idempotent: skip when an active enrollment already exists.
+      const route2 = await getEntryRouteByRefCode(db, ref);
+      console.log(`[LIFF entry-route] ref=${ref} route=${!!route2} scenarioId=${route2?.scenario_id} friend=${friend.id} alreadyFriend=${body.alreadyFriend}`);
+      if (route2?.scenario_id) {
+        const existingEnrollment = await db
+          .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
+          .bind(friend.id, route2.scenario_id)
+          .first<{ id: string }>();
+        console.log(`[LIFF entry-route] existing=${!!existingEnrollment}`);
+        if (!existingEnrollment) {
+          try {
+            const friendScenario = await enrollFriendInScenario(db, friend.id, route2.scenario_id);
+            await notifyScenarioEnrolled(c.env.DISCORD_WEBHOOK_URL, db, friend.id, route2.scenario_id);
+            console.log(`[LIFF entry-route] enrolled successfully`);
+
+            // Push the first step immediately if delay_minutes=0 — without
+            // this the enrollment row sits at current_step_order=0 and the
+            // 5min cron eventually delivers, but the operator sees nothing
+            // for several minutes and the previous block (alreadyFriend)
+            // skips because it now sees the enrollment as already-existing.
+            const accountRow = await db
+              .prepare(`SELECT line_account_id FROM scenarios WHERE id = ?`)
+              .bind(route2.scenario_id)
+              .first<{ line_account_id: string | null }>();
+            const accountId = accountRow?.line_account_id ?? null;
+            if (accountId && friendScenario.status === 'active') {
+              const account = await getLineAccountById(db, accountId);
+              const steps = await getScenarioSteps(db, route2.scenario_id);
+              const firstStep = steps[0];
+              if (account && firstStep && firstStep.delay_minutes === 0) {
+                try {
+                  let content = applyVars(firstStep.message_content, {
+                    name: friend.display_name ?? '',
+                    friendId: friend.id,
+                  });
+                  if (c.env.TRACKING_BASE_URL) {
+                    content = applyTrackingLinks(content, c.env.TRACKING_BASE_URL, friend.id);
+                  }
+                  const message = buildMessage(firstStep.message_type, content);
+                  const lineClient2 = new LineClient(account.channel_access_token);
+                  await lineClient2.pushMessage(lineUserId, [message]);
+                  await db
+                    .prepare(
+                      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+                    )
+                    .bind(
+                      crypto.randomUUID(),
+                      friend.id,
+                      firstStep.message_type,
+                      content,
+                      firstStep.id,
+                      jstNow(),
+                    )
+                    .run();
+                  await upsertChatOnMessage(db, friend.id);
+                  // Advance/complete so the cron doesn't re-deliver step 0.
+                  const secondStep = steps[1] ?? null;
+                  if (secondStep) {
+                    const nextDeliveryDate = new Date();
+                    nextDeliveryDate.setMinutes(
+                      nextDeliveryDate.getMinutes() + secondStep.delay_minutes,
+                    );
+                    await advanceFriendScenario(
+                      db,
+                      friendScenario.id,
+                      firstStep.step_order,
+                      toJstString(nextDeliveryDate),
+                    );
+                  } else {
+                    await completeFriendScenario(db, friendScenario.id);
+                  }
+                } catch (err) {
+                  console.error('[LIFF entry-route] first step push failed:', err);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('[LIFF entry-route] enroll failed:', err);
+          }
+        }
       }
     }
 
@@ -427,11 +676,15 @@ liffRoutes.post('/api/liff/link', async (c) => {
               .first<{ id: string }>();
             if (!existing) {
               const friendScenario = await enrollFriendInScenario(db, friend.id, scenario.id);
+              await notifyScenarioEnrolled(c.env.DISCORD_WEBHOOK_URL, db, friend.id, scenario.id);
               const steps = await getScenarioSteps(db, scenario.id);
               const firstStep = steps[0];
               if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
                 try {
-                  const content = applyVars(firstStep.message_content, { name: friend.display_name ?? '' });
+                  let content = applyVars(firstStep.message_content, { name: friend.display_name ?? '', friendId: friend.id });
+                  if (c.env.TRACKING_BASE_URL) {
+                    content = applyTrackingLinks(content, c.env.TRACKING_BASE_URL, friend.id);
+                  }
                   const message = buildMessage(firstStep.message_type, content);
                   await lineClient.pushMessage(lineUserId, [message]);
 
@@ -442,7 +695,7 @@ liffRoutes.post('/api/liff/link', async (c) => {
                       `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
                        VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
                     )
-                    .bind(logId, friend.id, firstStep.message_type, firstStep.message_content, firstStep.id, logNow)
+                    .bind(logId, friend.id, firstStep.message_type, content, firstStep.id, logNow)
                     .run();
 
                   // Ensure chat room exists
@@ -456,9 +709,9 @@ liffRoutes.post('/api/liff/link', async (c) => {
 
                   const secondStep = steps[1] ?? null;
                   if (secondStep) {
-                    const nextDeliveryDate = new Date(Date.now() + 9 * 60 * 60_000);
+                    const nextDeliveryDate = new Date();
                     nextDeliveryDate.setMinutes(nextDeliveryDate.getMinutes() + secondStep.delay_minutes);
-                    await advanceFriendScenario(db, friendScenario.id, firstStep.step_order, nextDeliveryDate.toISOString().slice(0, -1) + '+09:00');
+                    await advanceFriendScenario(db, friendScenario.id, firstStep.step_order, toJstString(nextDeliveryDate));
                   } else {
                     await completeFriendScenario(db, friendScenario.id);
                   }
@@ -501,6 +754,80 @@ liffRoutes.post('/api/liff/link', async (c) => {
     });
   } catch (err) {
     console.error('POST /api/liff/link error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/liff/send-template - send a template message to current LIFF user
+// Used by external archive pages: button click → LIFF auto-redirects → template arrives in LINE
+liffRoutes.post('/api/liff/send-template', async (c) => {
+  try {
+    const body = await c.req.json<{
+      idToken: string;
+      templateId: string;
+      liffId?: string;
+    }>();
+
+    if (!body.idToken || !body.templateId) {
+      return c.json({ success: false, error: 'idToken and templateId are required' }, 400);
+    }
+
+    const channelId = body.liffId ? body.liffId.split('-')[0] : c.env.LINE_CHANNEL_ID;
+    const verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ id_token: body.idToken, client_id: channelId }),
+    });
+    if (!verifyRes.ok) {
+      return c.json({ success: false, error: 'Invalid ID token' }, 401);
+    }
+    const verified = await verifyRes.json<{ sub: string; name?: string }>();
+    const lineUserId = verified.sub;
+
+    const db = c.env.DB;
+    const friend = await getFriendByLineUserId(db, lineUserId);
+    if (!friend) {
+      return c.json({ success: false, error: '友達登録が必要です' }, 404);
+    }
+
+    const tpl = await getTemplateById(db, body.templateId);
+    if (!tpl) {
+      return c.json({ success: false, error: 'Template not found' }, 404);
+    }
+
+    // Resolve LINE channel: use the friend's account if multi-account; fallback to env
+    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (friend.line_account_id) {
+      const account = await getLineAccountById(db, friend.line_account_id);
+      if (account?.channel_access_token) accessToken = account.channel_access_token;
+    }
+
+    const personalContent = applyVars(tpl.message_content, {
+      name: friend.display_name ?? '',
+      friendId: friend.id,
+    });
+    const trackedContent = c.env.TRACKING_BASE_URL
+      ? applyTrackingLinks(personalContent, c.env.TRACKING_BASE_URL, friend.id)
+      : personalContent;
+
+    const message = buildMessage(tpl.message_type, trackedContent);
+    const client = new LineClient(accessToken);
+    await client.pushMessage(friend.line_user_id, [message]);
+
+    // Log outgoing
+    const now = jstNow();
+    await db
+      .prepare(
+        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+         VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, ?)`,
+      )
+      .bind(crypto.randomUUID(), friend.id, tpl.message_type, tpl.message_content, now)
+      .run();
+    await upsertChatOnMessage(db, friend.id, now);
+
+    return c.json({ success: true, data: { templateName: tpl.name } });
+  } catch (err) {
+    console.error('POST /api/liff/send-template error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

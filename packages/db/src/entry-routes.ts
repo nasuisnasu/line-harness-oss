@@ -7,8 +7,17 @@ export interface EntryRoute {
   scenario_id: string | null;
   redirect_url: string | null;
   is_active: number;
+  line_account_id: string | null;
+  /** Free-form group label for UI bucketing (e.g. "Threads", "LP", "広告").
+   *  NULL = 未分類. Operator-controlled, no fixed enum. */
+  group_name: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** EntryRouteに紐づく自動付与タグID一覧（中間テーブル経由） */
+export interface EntryRouteWithTags extends EntryRoute {
+  tag_ids: string[];
 }
 
 export interface RefTracking {
@@ -24,10 +33,46 @@ export interface CreateEntryRouteInput {
   refCode: string;
   name: string;
   tagId?: string | null;
+  /** 自動付与タグID一覧（複数対応）。指定すると tagId は無視 */
+  tagIds?: string[];
   scenarioId?: string | null;
   redirectUrl?: string | null;
   isActive?: boolean;
   lineAccountId?: string | null;
+  /** UI grouping label. NULL/undefined → 未分類. */
+  groupName?: string | null;
+}
+
+/** 中間テーブルからtag_id配列を取得 */
+async function fetchEntryRouteTagIds(db: D1Database, entryRouteId: string): Promise<string[]> {
+  const res = await db
+    .prepare(`SELECT tag_id FROM entry_route_tags WHERE entry_route_id = ?`)
+    .bind(entryRouteId)
+    .all<{ tag_id: string }>();
+  return res.results.map((r) => r.tag_id);
+}
+
+/** 中間テーブルを丸ごと置き換える */
+async function replaceEntryRouteTags(db: D1Database, entryRouteId: string, tagIds: string[]): Promise<void> {
+  await db.prepare(`DELETE FROM entry_route_tags WHERE entry_route_id = ?`).bind(entryRouteId).run();
+  if (tagIds.length === 0) return;
+  const now = jstNow();
+  const stmts = tagIds.map((tagId) =>
+    db
+      .prepare(`INSERT INTO entry_route_tags (entry_route_id, tag_id, created_at) VALUES (?, ?, ?)`)
+      .bind(entryRouteId, tagId, now),
+  );
+  await db.batch(stmts);
+}
+
+/** entry_routeに紐づく全タグID（旧tag_id + 中間テーブル）を返す */
+export async function getEntryRouteTagIds(db: D1Database, entryRoute: EntryRoute): Promise<string[]> {
+  const tagIds = await fetchEntryRouteTagIds(db, entryRoute.id);
+  // 後方互換：旧 tag_id カラムも含める（重複は除く）
+  if (entryRoute.tag_id && !tagIds.includes(entryRoute.tag_id)) {
+    tagIds.push(entryRoute.tag_id);
+  }
+  return tagIds;
 }
 
 export async function getEntryRoutes(db: D1Database): Promise<EntryRoute[]> {
@@ -58,8 +103,8 @@ export async function createEntryRoute(
   await db
     .prepare(
       `INSERT INTO entry_routes
-         (id, ref_code, name, tag_id, scenario_id, redirect_url, is_active, line_account_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, ref_code, name, tag_id, scenario_id, redirect_url, is_active, line_account_id, group_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -70,10 +115,16 @@ export async function createEntryRoute(
       input.redirectUrl ?? null,
       isActive,
       input.lineAccountId ?? null,
+      input.groupName ?? null,
       now,
       now,
     )
     .run();
+
+  // 複数タグの紐付け
+  if (input.tagIds && input.tagIds.length > 0) {
+    await replaceEntryRouteTags(db, id, input.tagIds);
+  }
 
   return (await db
     .prepare(`SELECT * FROM entry_routes WHERE id = ?`)
@@ -96,6 +147,7 @@ export async function updateEntryRoute(
   if (input.scenarioId !== undefined) { fields.push('scenario_id = ?'); values.push(input.scenarioId ?? null); }
   if (input.redirectUrl !== undefined) { fields.push('redirect_url = ?'); values.push(input.redirectUrl ?? null); }
   if (input.isActive !== undefined) { fields.push('is_active = ?'); values.push(input.isActive ? 1 : 0); }
+  if (input.groupName !== undefined) { fields.push('group_name = ?'); values.push(input.groupName ?? null); }
 
   values.push(id);
 
@@ -103,6 +155,11 @@ export async function updateEntryRoute(
     .prepare(`UPDATE entry_routes SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...values)
     .run();
+
+  // 複数タグが指定されていれば置換
+  if (input.tagIds !== undefined) {
+    await replaceEntryRouteTags(db, id, input.tagIds);
+  }
 
   return db
     .prepare(`SELECT * FROM entry_routes WHERE id = ?`)

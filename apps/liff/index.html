@@ -410,6 +410,199 @@
     .close-btn:active {
       background: #e8faf0;
     }
+
+    /* ========== Event Booking — Week View ========== */
+    .ev-week {
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      margin-bottom: 16px;
+    }
+    .ev-week-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .ev-week-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ev-day {
+      border: 1px solid #f0f0f0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .ev-day-head {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 44px;
+      padding-top: 2px;
+    }
+    .ev-day-dom {
+      font-size: 15px;
+      font-weight: 700;
+      color: #333;
+    }
+    .ev-day-dow {
+      font-size: 11px;
+      color: #999;
+    }
+    .ev-day-dow.sun { color: #e53e3e; }
+    .ev-day-dow.sat { color: #3b82f6; }
+    .ev-slots {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .ev-slot {
+      padding: 6px 10px !important;
+      font-size: 13px !important;
+      font-weight: 600;
+    }
+    .ev-no-slot {
+      font-size: 12px;
+      color: #bbb;
+      align-self: center;
+    }
+    .cal-nav:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    /* ===== Shared Form / LIFF Page Styles =====
+       These were originally only injected by form.ts but are also needed by
+       event-booking.ts. Moved here so any LIFF page can use them. */
+    .form-page { max-width: 480px; margin: 0 auto; padding: 12px; }
+    .form-header { text-align: center; margin-bottom: 24px; }
+    .form-header h1 { font-size: 20px; color: #333; margin-bottom: 8px; }
+    .form-description { font-size: 14px; color: #999; text-align: left; white-space: pre-wrap; }
+    .form-profile { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; }
+    .form-profile img { width: 36px; height: 36px; border-radius: 50%; }
+    .form-profile span { font-size: 14px; font-weight: 600; }
+    .form-body { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .form-field { margin-bottom: 20px; }
+    .form-label { display: block; font-size: 14px; font-weight: 600; color: #333; margin-bottom: 6px; }
+    .required-mark { color: #e53e3e; margin-left: 2px; }
+    .form-input, .form-textarea, .form-select {
+      width: 100%; padding: 12px; border: 1.5px solid #e0e0e0; border-radius: 8px;
+      font-size: 14px; font-family: inherit; background: #fafafa;
+      transition: border-color 0.15s; box-sizing: border-box;
+      -webkit-appearance: none;
+    }
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      outline: none; border-color: #06C755; background: #fff;
+    }
+    .form-textarea { resize: vertical; min-height: 120px; overflow: hidden; }
+    /* Inline "その他" text field that lives inside a radio/checkbox label —
+       takes the remaining horizontal space and looks unobtrusive so it's
+       clear it's an extension of the option, not a separate field. */
+    .ev-other-inline {
+      flex: 1;
+      min-width: 0;
+      padding: 4px 8px;
+      border: none;
+      border-bottom: 1px solid #e0e0e0;
+      background: transparent;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+    }
+    .ev-other-inline:focus { border-bottom-color: #06C755; }
+    .form-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+    .radio-group, .checkbox-group { display: flex; flex-direction: column; gap: 10px; }
+    .radio-label, .checkbox-label {
+      display: flex; align-items: center; gap: 8px; font-size: 15px; color: #333;
+      padding: 4px 0; cursor: pointer;
+    }
+    .radio-label input, .checkbox-label input { accent-color: #06C755; width: 18px; height: 18px; }
+    .submit-btn {
+      width: 100%; padding: 14px; border: none; border-radius: 8px;
+      background: #06C755; color: #fff; font-size: 16px; font-weight: 700;
+      cursor: pointer; font-family: inherit; margin-top: 8px; transition: opacity 0.15s;
+    }
+    .submit-btn:active { opacity: 0.85; }
+    .submit-btn:disabled { background: #bbb; cursor: not-allowed; }
+    .form-error { color: #e53e3e; font-size: 12px; margin-top: 4px; }
+    .form-success { text-align: center; padding: 40px 20px; }
+    .form-success .check { width: 64px; height: 64px; border-radius: 50%; background: #06C755; color: #fff; font-size: 32px; line-height: 64px; margin: 0 auto 16px; }
+    .form-success h2 { font-size: 20px; color: #06C755; margin-bottom: 12px; }
+    .form-success p { font-size: 14px; color: #666; line-height: 1.6; }
+
+    /* ===== Event Booking — Date × Time grid ===== */
+    .ev-grid-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .ev-grid {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+    .ev-grid th, .ev-grid td {
+      padding: 6px 0;
+      text-align: center;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .ev-th-time {
+      width: 36px;
+      background: #fafafa;
+    }
+    .ev-th {
+      padding: 8px 2px;
+      background: #fafafa;
+      font-weight: 600;
+      color: #333;
+    }
+    .ev-th-dow { font-size: 11px; color: #777; line-height: 1.2; }
+    .ev-th-dom { font-size: 16px; line-height: 1.2; margin-top: 2px; font-weight: 700; }
+    .ev-th.sun .ev-th-dow, .ev-cell.sun { color: #e53e3e; }
+    .ev-th.sat .ev-th-dow, .ev-cell.sat { color: #3b82f6; }
+    .ev-time {
+      background: #fafafa;
+      font-size: 11px;
+      color: #666;
+      font-variant-numeric: tabular-nums;
+    }
+    .ev-cell-none {
+      color: #ddd;
+    }
+    .ev-cell-x {
+      color: #e57373;
+      font-weight: 600;
+    }
+    .ev-cell-o {
+      padding: 2px 0 !important;
+    }
+    .ev-cell-btn {
+      width: 100%;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: #06C755;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background 0.1s;
+    }
+    .ev-cell-btn:active {
+      background: #e8faf0;
+    }
+    .ev-empty {
+      padding: 24px 0;
+      color: #999;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>

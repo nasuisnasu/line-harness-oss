@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import type { RichMenuItem } from '@/lib/api'
 import type { Tag } from '@line-crm/shared'
 import type { FriendWithTags } from '@/lib/api'
@@ -35,6 +36,7 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
   const [scenarioHistories, setScenarioHistories] = useState<Record<string, ScenarioHistory[]>>({})
   const [richMenus, setRichMenus] = useState<RichMenuItem[]>([])
   const [richMenuMessage, setRichMenuMessage] = useState('')
+  const router = useRouter()
 
   useEffect(() => {
     api.richMenus.list().then(res => { if (res.success) setRichMenus(res.data.filter(r => r.lineRichmenuId)) }).catch(() => {})
@@ -257,6 +259,20 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
                   <tr key={`${friend.id}-detail`} className="bg-gray-50">
                     <td colSpan={5} className="px-6 py-4">
                       <div className="space-y-3">
+                        {/* チャットを開く */}
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => router.push(`/chats?friendId=${friend.id}`)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md text-white transition-opacity hover:opacity-90"
+                            style={{ backgroundColor: '#06C755' }}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.9A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                            チャットを開く
+                          </button>
+                        </div>
+
                         {/* 流入経路 / 登録日 / 予約 / 入金 */}
                         <FriendInfoPanel friendId={friend.id} />
 

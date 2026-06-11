@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tags (
   id         TEXT PRIMARY KEY,
   name       TEXT UNIQUE NOT NULL,
   color      TEXT NOT NULL DEFAULT '#3B82F6',
+  group_name TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
@@ -64,7 +65,7 @@ CREATE TABLE IF NOT EXISTS scenario_steps (
   scenario_id     TEXT NOT NULL REFERENCES scenarios (id) ON DELETE CASCADE,
   step_order      INTEGER NOT NULL,
   delay_minutes   INTEGER NOT NULL DEFAULT 0,
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex')),
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'richmenu', 'buttons')),
   message_content TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   UNIQUE (scenario_id, step_order)
@@ -132,12 +133,14 @@ CREATE INDEX IF NOT EXISTS idx_messages_log_created_at ON messages_log (created_
 -- ============================================================
 CREATE TABLE IF NOT EXISTS auto_replies (
   id               TEXT PRIMARY KEY,
+  line_account_id  TEXT,
   keyword          TEXT NOT NULL,
   match_type       TEXT NOT NULL CHECK (match_type IN ('exact', 'contains')) DEFAULT 'exact',
   response_type    TEXT NOT NULL DEFAULT 'text',
   response_content TEXT NOT NULL,
   is_active        INTEGER NOT NULL DEFAULT 1,
-  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at       TEXT
 );
 
 -- ============================================================
@@ -366,8 +369,9 @@ CREATE TABLE IF NOT EXISTS templates (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
   category        TEXT NOT NULL DEFAULT 'general',
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel')),
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel', 'buttons')),
   message_content TEXT NOT NULL,
+  line_account_id TEXT,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );

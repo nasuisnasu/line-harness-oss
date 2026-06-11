@@ -35,8 +35,12 @@ interface FormField {
 interface FormDef {
   id: string;
   name: string;
+  /** Public-facing title shown to respondents; falls back to `name`. */
+  displayName?: string | null;
   description: string | null;
   fields: FormField[];
+  /** Custom CTA label for the submit button; falls back to "送信する". */
+  submitLabel?: string | null;
   isActive: boolean;
 }
 
@@ -162,10 +166,10 @@ function injectStyles(): void {
   const style = document.createElement('style');
   style.id = 'form-styles';
   style.textContent = `
-    .form-page { max-width: 480px; margin: 0 auto; padding: 16px; }
+    .form-page { max-width: 480px; margin: 0 auto; padding: 12px; }
     .form-header { text-align: center; margin-bottom: 24px; }
     .form-header h1 { font-size: 20px; color: #333; margin-bottom: 8px; }
-    .form-description { font-size: 14px; color: #999; }
+    .form-description { font-size: 14px; color: #999; text-align: left; white-space: pre-wrap; }
     .form-profile { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; }
     .form-profile img { width: 36px; height: 36px; border-radius: 50%; }
     .form-profile span { font-size: 14px; font-weight: 600; }
@@ -175,7 +179,7 @@ function injectStyles(): void {
     .required-mark { color: #e53e3e; margin-left: 2px; }
     .form-input, .form-textarea, .form-select {
       width: 100%; padding: 12px; border: 1.5px solid #e0e0e0; border-radius: 8px;
-      font-size: 16px; font-family: inherit; background: #fafafa;
+      font-size: 14px; font-family: inherit; background: #fafafa;
       transition: border-color 0.15s; box-sizing: border-box;
       -webkit-appearance: none;
     }
@@ -230,13 +234,13 @@ function render(): void {
   app.innerHTML = `
     <div class="form-page">
       <div class="form-header">
-        <h1>${escapeHtml(formDef.name)}</h1>
+        <h1>${escapeHtml(formDef.displayName?.trim() || formDef.name)}</h1>
         ${formDef.description ? `<p class="form-description">${escapeHtml(formDef.description)}</p>` : ''}
         ${profileHtml}
       </div>
       <form id="liff-form" class="form-body" novalidate>
         ${fieldsHtml}
-        <button type="submit" class="submit-btn" id="submitBtn">送信する</button>
+        <button type="submit" class="submit-btn" id="submitBtn">${escapeHtml(formDef.submitLabel?.trim() || '送信する')}</button>
       </form>
     </div>
   `;
@@ -401,7 +405,7 @@ async function submitForm(): Promise<void> {
     state.submitting = false;
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.textContent = '送信する';
+      submitBtn.textContent = state.formDef?.submitLabel?.trim() || '送信する';
     }
     const existing = getApp().querySelector('.form-error-msg');
     if (existing) existing.remove();

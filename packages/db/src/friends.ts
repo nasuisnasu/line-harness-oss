@@ -7,6 +7,7 @@ export interface Friend {
   picture_url: string | null;
   status_message: string | null;
   is_following: number;
+  is_blocked: number;
   metadata: string;
   created_at: string;
   updated_at: string;
@@ -209,6 +210,17 @@ export async function updateFriendFollowStatus(
        WHERE line_user_id = ?`,
     )
     .bind(isFollowing ? 1 : 0, jstNow(), lineUserId)
+    .run();
+}
+
+export async function updateFriendBlocked(
+  db: D1Database,
+  id: string,
+  isBlocked: boolean,
+): Promise<void> {
+  await db
+    .prepare(`UPDATE friends SET is_blocked = ?, updated_at = ? WHERE id = ?`)
+    .bind(isBlocked ? 1 : 0, jstNow(), id)
     .run();
 }
 

@@ -6,11 +6,18 @@ workers_dev = true
 # API_KEY is set via `wrangler secret put API_KEY`
 # Do NOT hardcode secrets here
 
+[vars]
+TRACKING_BASE_URL = "https://line-crm-worker.readash-crm.workers.dev"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "line-crm"
 database_id = "85b4900a-b11f-4ccf-a9bf-7379ace472f9"
 migrations_dir = "../../packages/db/migrations"
 
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "line-crm-uploads"
+
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
