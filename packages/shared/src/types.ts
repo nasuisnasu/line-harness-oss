@@ -329,6 +329,10 @@ export interface LineAccount {
   channelSecret: string;
   /** 有効/無効 */
   isActive: boolean;
+  /** 公式アカウントアイコンURL（LINE API から同期） */
+  pictureUrl?: string | null;
+  /** 最終プロフィール同期日時 */
+  profileSyncedAt?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
   /** 更新日時 (ISO 8601) */

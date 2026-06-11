@@ -17,9 +17,12 @@ function serializeLineAccount(row: DbLineAccount) {
     channelId: row.channel_id,
     name: row.name,
     isActive: Boolean(row.is_active),
+    welcomeFallbackMessage: row.welcome_fallback_message ?? null,
+    testFriendId: row.test_friend_id ?? null,
+    pictureUrl: row.picture_url ?? null,
+    profileSyncedAt: row.profile_synced_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    // Intentionally omit channelAccessToken and channelSecret from list responses
   };
 }
 
@@ -90,6 +93,8 @@ lineAccounts.put('/api/line-accounts/:id', async (c) => {
       channelAccessToken?: string;
       channelSecret?: string;
       isActive?: boolean;
+      welcomeFallbackMessage?: string | null;
+      testFriendId?: string | null;
     }>();
 
     const updated = await updateLineAccount(c.env.DB, id, {
@@ -97,6 +102,8 @@ lineAccounts.put('/api/line-accounts/:id', async (c) => {
       channel_access_token: body.channelAccessToken,
       channel_secret: body.channelSecret,
       is_active: body.isActive !== undefined ? (body.isActive ? 1 : 0) : undefined,
+      welcome_fallback_message: body.welcomeFallbackMessage,
+      test_friend_id: body.testFriendId,
     });
 
     if (!updated) {
@@ -117,6 +124,24 @@ lineAccounts.delete('/api/line-accounts/:id', async (c) => {
   } catch (err) {
     console.error('DELETE /api/line-accounts/:id error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// 手動で LINE 側プロフィール（名前・アイコン）を即時同期
+lineAccounts.post('/api/line-accounts/:id/sync-profile', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { syncLineAccountProfiles } = await import('../services/line-account-profile-sync.js');
+    const result = await syncLineAccountProfiles(c.env.DB, { force: true, accountId: id });
+    if (result.errors.length > 0) {
+      return c.json({ success: false, error: result.errors[0].error }, 500);
+    }
+    const { getLineAccountById } = await import('@line-crm/db');
+    const acc = await getLineAccountById(c.env.DB, id);
+    if (!acc) return c.json({ success: false, error: 'Not found' }, 404);
+    return c.json({ success: true, data: serializeLineAccount(acc) });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

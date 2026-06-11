@@ -63,6 +63,19 @@ export class LineClient {
     );
   }
 
+  // 公式アカウント（Bot）自身のプロフィール
+  async getBotInfo(): Promise<{
+    userId: string;
+    basicId: string;
+    displayName: string;
+    pictureUrl?: string;
+    premiumId?: string;
+    chatMode?: string;
+    markAsReadMode?: string;
+  }> {
+    return this.request('/info', {}, 'GET');
+  }
+
   // ─── Messaging ───────────────────────────────────────────────────────────
 
   async pushMessage(to: string, messages: Message[]): Promise<void> {
@@ -175,5 +188,24 @@ export class LineClient {
       const text = await res.text().catch(() => '');
       throw new Error(`LINE API error: ${res.status} ${res.statusText} — ${text}`);
     }
+  }
+
+  /** リッチメニュー画像をLINE側から取得（プレビュー用プロキシ） */
+  async downloadRichMenuImage(richMenuId: string): Promise<{ data: ArrayBuffer; contentType: string }> {
+    const url = `https://api-data.line.me/v2/bot/richmenu/${encodeURIComponent(richMenuId)}/content`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.channelAccessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`LINE API error: ${res.status} ${res.statusText} — ${text}`);
+    }
+    return { data: await res.arrayBuffer(), contentType: res.headers.get('content-type') ?? 'image/png' };
+  }
+
+  /** デフォルトリッチメニューを解除 */
+  async cancelDefaultRichMenu(): Promise<void> {
+    await this.request('/user/all/richmenu', {}, 'DELETE');
   }
 }

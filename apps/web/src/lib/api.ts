@@ -320,6 +320,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    syncProfile: (id: string) =>
+      fetchApi<ApiResponse<LineAccount>>(`/api/line-accounts/${id}/sync-profile`, {
+        method: 'POST',
+      }),
     update: (id: string, data: Partial<Pick<LineAccount, 'name' | 'channelAccessToken' | 'channelSecret' | 'isActive'>>) =>
       fetchApi<ApiResponse<LineAccount>>(`/api/line-accounts/${id}`, {
         method: 'PUT',

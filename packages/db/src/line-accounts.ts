@@ -10,6 +10,10 @@ export interface LineAccount {
   channel_access_token: string;
   channel_secret: string;
   is_active: number;
+  welcome_fallback_message: string | null;
+  test_friend_id: string | null;
+  picture_url: string | null;
+  profile_synced_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -19,6 +23,7 @@ export interface CreateLineAccountInput {
   name: string;
   channelAccessToken: string;
   channelSecret: string;
+  welcomeFallbackMessage?: string | null;
 }
 
 export async function createLineAccount(
@@ -67,7 +72,7 @@ export async function getLineAccountByChannelId(
 }
 
 export type UpdateLineAccountInput = Partial<
-  Pick<LineAccount, 'name' | 'channel_access_token' | 'channel_secret' | 'is_active'>
+  Pick<LineAccount, 'name' | 'channel_access_token' | 'channel_secret' | 'is_active' | 'welcome_fallback_message' | 'test_friend_id' | 'picture_url' | 'profile_synced_at'>
 >;
 
 export async function updateLineAccount(
@@ -93,6 +98,22 @@ export async function updateLineAccount(
   if (updates.is_active !== undefined) {
     fields.push('is_active = ?');
     values.push(updates.is_active);
+  }
+  if (updates.welcome_fallback_message !== undefined) {
+    fields.push('welcome_fallback_message = ?');
+    values.push(updates.welcome_fallback_message ?? null);
+  }
+  if (updates.test_friend_id !== undefined) {
+    fields.push('test_friend_id = ?');
+    values.push(updates.test_friend_id ?? null);
+  }
+  if (updates.picture_url !== undefined) {
+    fields.push('picture_url = ?');
+    values.push(updates.picture_url ?? null);
+  }
+  if (updates.profile_synced_at !== undefined) {
+    fields.push('profile_synced_at = ?');
+    values.push(updates.profile_synced_at ?? null);
   }
 
   if (fields.length === 0) return getLineAccountById(db, id);

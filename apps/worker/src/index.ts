@@ -4,7 +4,9 @@ import { LineClient } from '@line-crm/line-sdk';
 import { processStepDeliveries } from './services/step-delivery.js';
 import { processScheduledBroadcasts } from './services/broadcast.js';
 import { processReminderDeliveries } from './services/reminder-delivery.js';
+import { processBookingReminders } from './services/booking-reminders.js';
 import { checkAccountHealth } from './services/ban-monitor.js';
+import { syncLineAccountProfiles } from './services/line-account-profile-sync.js';
 import { authMiddleware } from './middleware/auth.js';
 import { webhook } from './routes/webhook.js';
 import { friends } from './routes/friends.js';
@@ -32,10 +34,15 @@ import { richMenus } from './routes/rich-menus.js';
 import { trackedLinks } from './routes/tracked-links.js';
 import { forms } from './routes/forms.js';
 import { entryRoutes } from './routes/entry-routes.js';
+import { uploads } from './routes/uploads.js';
+import { actions } from './routes/actions.js';
+import { autoReplies } from './routes/auto-replies.js';
+import { events as eventsRoute } from './routes/events.js';
 
 export type Env = {
   Bindings: {
     DB: D1Database;
+    UPLOADS: R2Bucket;
     LINE_CHANNEL_SECRET: string;
     LINE_CHANNEL_ACCESS_TOKEN: string;
     API_KEY: string;
@@ -44,6 +51,8 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     DISCORD_WEBHOOK_URL?: string;
+    TRACKING_BASE_URL?: string;
+    GOOGLE_SA_JSON?: string;
   };
 };
 
@@ -83,6 +92,10 @@ app.route('/', richMenus);
 app.route('/', trackedLinks);
 app.route('/', forms);
 app.route('/', entryRoutes);
+app.route('/', uploads);
+app.route('/', actions);
+app.route('/', autoReplies);
+app.route('/', eventsRoute);
 
 // 404 fallback
 app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));
@@ -96,10 +109,13 @@ async function scheduled(
   const lineClient = new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN);
 
   await Promise.allSettled([
-    processStepDeliveries(env.DB, lineClient),
-    processScheduledBroadcasts(env.DB, lineClient),
+    processStepDeliveries(env.DB, lineClient, env.TRACKING_BASE_URL),
+    processScheduledBroadcasts(env.DB, lineClient, env.TRACKING_BASE_URL),
     processReminderDeliveries(env.DB, lineClient),
+    processBookingReminders(env.DB),
     checkAccountHealth(env.DB),
+    // LINE OA の表示名/アイコンを24時間に1回 LINE API から同期
+    syncLineAccountProfiles(env.DB),
   ]);
 }
 
