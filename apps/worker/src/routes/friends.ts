@@ -689,4 +689,84 @@ friends.post('/api/friends/:id/messages', async (c) => {
   }
 });
 
+// GET /api/friends/:id/family
+// metadata.field_name(本人氏名) と field_student_name(保護者の場合は生徒氏名) を
+// 同じ LINE アカウント内で突き合わせて、親子関係を返す。
+// 突き合わせは厳密一致（漢字含めて完全一致）。
+friends.get('/api/friends/:id/family', async (c) => {
+  try {
+    const friendId = c.req.param('id');
+    const me = await c.env.DB
+      .prepare('SELECT id, line_account_id, display_name, metadata FROM friends WHERE id = ?')
+      .bind(friendId)
+      .first<{ id: string; line_account_id: string | null; display_name: string | null; metadata: string | null }>();
+    if (!me) return c.json({ success: false, error: 'Friend not found' }, 404);
+
+    let meta: Record<string, unknown> = {};
+    try { meta = JSON.parse(me.metadata || '{}'); } catch {}
+    const role = String(meta.field_21ff99 ?? '').trim(); // '生徒' | '保護者' | ''
+    const myName = String(meta.field_name ?? '').trim();
+    const studentName = String(meta.field_student_name ?? '').trim();
+
+    // 同じ line_account 内のフレンドだけ対象
+    const accountFilter = me.line_account_id ? 'AND line_account_id = ?' : 'AND line_account_id IS NULL';
+    const bindBase: unknown[] = me.line_account_id ? [me.line_account_id] : [];
+
+    const result: {
+      role: string;
+      myName: string;
+      studentName: string;
+      parents: { id: string; displayName: string | null; parentName: string }[];
+      children: { id: string; displayName: string | null; studentName: string }[];
+    } = { role, myName, studentName, parents: [], children: [] };
+
+    // 自分が生徒なら、自分の氏名(myName) と一致する field_student_name を持つ保護者を探す
+    if (myName && role === '生徒') {
+      const parents = await c.env.DB
+        .prepare(
+          `SELECT id, display_name,
+                  json_extract(metadata, '$.field_name') as parent_name
+           FROM friends
+           WHERE id != ?
+             ${accountFilter}
+             AND json_extract(metadata, '$.field_21ff99') = '保護者'
+             AND json_extract(metadata, '$.field_student_name') = ?`,
+        )
+        .bind(friendId, ...bindBase, myName)
+        .all<{ id: string; display_name: string | null; parent_name: string | null }>();
+      result.parents = (parents.results ?? []).map((r) => ({
+        id: r.id,
+        displayName: r.display_name,
+        parentName: r.parent_name ?? '',
+      }));
+    }
+
+    // 自分が保護者なら、自分の field_student_name と一致する氏名を持つ生徒を探す
+    if (studentName && role === '保護者') {
+      const children = await c.env.DB
+        .prepare(
+          `SELECT id, display_name,
+                  json_extract(metadata, '$.field_name') as student_name
+           FROM friends
+           WHERE id != ?
+             ${accountFilter}
+             AND json_extract(metadata, '$.field_21ff99') = '生徒'
+             AND json_extract(metadata, '$.field_name') = ?`,
+        )
+        .bind(friendId, ...bindBase, studentName)
+        .all<{ id: string; display_name: string | null; student_name: string | null }>();
+      result.children = (children.results ?? []).map((r) => ({
+        id: r.id,
+        displayName: r.display_name,
+        studentName: r.student_name ?? '',
+      }));
+    }
+
+    return c.json({ success: true, data: result });
+  } catch (err) {
+    console.error('GET /api/friends/:id/family error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 export { friends };

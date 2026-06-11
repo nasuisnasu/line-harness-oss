@@ -16,6 +16,7 @@ export interface Form {
   on_submit_message: string | null;
   submit_label: string | null;
   save_to_metadata: number;
+  submit_once: number;
   is_active: number;
   submit_count: number;
   form_type: FormType;
@@ -64,6 +65,7 @@ export interface CreateFormInput {
   onSubmitMessage?: string | null;
   submitLabel?: string | null;
   saveToMetadata?: boolean;
+  submitOnce?: boolean;
   formType?: FormType;
   correctAnswers?: string | null;
   passingScore?: number | null;
@@ -79,10 +81,10 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
     .prepare(
       `INSERT INTO forms
          (id, name, display_name, description, fields, on_submit_tag_id, on_submit_scenario_id,
-          on_submit_message, submit_label, save_to_metadata, is_active, submit_count,
+          on_submit_message, submit_label, save_to_metadata, submit_once, is_active, submit_count,
           form_type, correct_answers, passing_score, pass_tag_id, fail_tag_id,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -95,6 +97,7 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
       input.onSubmitMessage ?? null,
       input.submitLabel ?? null,
       input.saveToMetadata !== false ? 1 : 0,
+      input.submitOnce ? 1 : 0,
       input.formType ?? 'generic',
       input.correctAnswers ?? null,
       input.passingScore ?? null,
@@ -118,6 +121,7 @@ export interface UpdateFormInput {
   onSubmitMessage?: string | null;
   submitLabel?: string | null;
   saveToMetadata?: boolean;
+  submitOnce?: boolean;
   isActive?: boolean;
   formType?: FormType;
   correctAnswers?: string | null;
@@ -148,6 +152,7 @@ export async function updateForm(
            on_submit_message = ?,
            submit_label = ?,
            save_to_metadata = ?,
+           submit_once = ?,
            is_active = ?,
            form_type = ?,
            correct_answers = ?,
@@ -171,6 +176,7 @@ export async function updateForm(
       'saveToMetadata' in input
         ? (input.saveToMetadata !== false ? 1 : 0)
         : existing.save_to_metadata,
+      'submitOnce' in input ? (input.submitOnce ? 1 : 0) : existing.submit_once,
       'isActive' in input ? (input.isActive ? 1 : 0) : existing.is_active,
       input.formType ?? existing.form_type,
       'correctAnswers' in input ? (input.correctAnswers ?? null) : existing.correct_answers,

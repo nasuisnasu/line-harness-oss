@@ -260,6 +260,24 @@ function renderSuccess(): void {
       </div>
     </div>
   `;
+  document.getElementById('closeBtn')?.addEventListener('click', () => {
+    if (liff.isInClient()) liff.closeWindow();
+    else window.close();
+  });
+}
+
+function renderAlreadySubmitted(message: string): void {
+  const app = getApp();
+  app.innerHTML = `
+    <div class="form-page">
+      <div class="success-card">
+        <div class="success-icon" style="color:#a0aec0;">ℹ️</div>
+        <h2>${escapeHtml(message)}</h2>
+        <p class="success-message">このフォームは1人1回までのご回答となっております。修正が必要な場合はお問い合わせください。</p>
+        <button class="close-btn" id="closeBtn">閉じる</button>
+      </div>
+    </div>
+  `;
 
   document.getElementById('closeBtn')?.addEventListener('click', () => {
     if (liff.isInClient()) {
@@ -395,11 +413,19 @@ async function submitForm(): Promise<void> {
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => null) as { error?: string } | null;
-      throw new Error(errData?.error ?? '送信に失敗しました');
+    const responseBody = await res.json().catch(() => null) as
+      | { success: boolean; error?: string; data?: { alreadySubmitted?: boolean; message?: string } }
+      | null;
+
+    if (!res.ok || responseBody?.success === false) {
+      throw new Error(responseBody?.error ?? '送信に失敗しました');
     }
 
+    // 1人1回まで制限のフォームで既に回答済みの場合
+    if (responseBody?.data?.alreadySubmitted) {
+      renderAlreadySubmitted(responseBody.data.message || '既に回答されています');
+      return;
+    }
     renderSuccess();
   } catch (err) {
     state.submitting = false;

@@ -36,6 +36,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
   const [submitMessage, setSubmitMessage] = useState('')
   const [submitLabel, setSubmitLabel] = useState('')
   const [saveToMetadata, setSaveToMetadata] = useState(true)
+  const [submitOnce, setSubmitOnce] = useState(false)
   const [isActive, setIsActive] = useState(true)
   const [tags, setTags] = useState<{ id: string; name: string; color?: string; groupName?: string | null }[]>([])
   const [scenarios, setScenarios] = useState<{ id: string; name: string; groupName?: string | null }[]>([])
@@ -70,6 +71,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
         setSubmitMessage(res.data.onSubmitMessage ?? '')
         setSubmitLabel(res.data.submitLabel ?? '')
         setSaveToMetadata(res.data.saveToMetadata)
+        setSubmitOnce(Boolean(res.data.submitOnce))
         setIsActive(res.data.isActive)
       } else {
         setError(res.error)
@@ -114,6 +116,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
         onSubmitMessage: submitMessage.trim() ? submitMessage : null,
         submitLabel: submitLabel || null,
         saveToMetadata,
+        submitOnce,
         isActive,
       }
       const res = id
@@ -377,6 +380,10 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={saveToMetadata} onChange={e => setSaveToMetadata(e.target.checked)} />
               回答内容を友達のメタデータに保存する
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={submitOnce} onChange={e => setSubmitOnce(e.target.checked)} />
+              1人1回まで（既に回答済みの友達は「既に回答されています」と表示）
             </label>
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />

@@ -119,6 +119,14 @@ export const api = {
         id: string; title: string; startAt: string; endAt: string;
         status: string; appEventId: string | null; eventName: string | null;
       }[]>>(`/api/friends/${friendId}/bookings`),
+    family: (friendId: string) =>
+      fetchApi<ApiResponse<{
+        role: string;
+        myName: string;
+        studentName: string;
+        parents: { id: string; displayName: string | null; parentName: string }[];
+        children: { id: string; displayName: string | null; studentName: string }[];
+      }>>(`/api/friends/${friendId}/family`),
     payments: {
       list: (friendId: string) =>
         fetchApi<ApiResponse<{
@@ -836,6 +844,7 @@ export const api = {
       onSubmitMessage?: string | null
       submitLabel?: string | null
       saveToMetadata?: boolean
+      submitOnce?: boolean
       isActive?: boolean
       formType?: 'generic' | 'daily_report' | 'test'
       correctAnswers?: Record<string, string | string[]> | null
@@ -856,6 +865,7 @@ export const api = {
       onSubmitMessage?: string | null
       submitLabel?: string | null
       saveToMetadata?: boolean
+      submitOnce?: boolean
       isActive?: boolean
       formType?: 'generic' | 'daily_report' | 'test'
       correctAnswers?: Record<string, string | string[]> | null
@@ -917,6 +927,8 @@ export interface FormItem {
   /** 送信ボタンのCTA文言 */
   submitLabel?: string | null
   saveToMetadata: boolean
+  /** 1人1回まで制限 */
+  submitOnce?: boolean
   isActive: boolean
   submitCount: number
   createdAt: string

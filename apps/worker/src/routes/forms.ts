@@ -32,6 +32,7 @@ function serializeForm(row: DbForm, opts: { includeAnswers?: boolean } = {}) {
     onSubmitMessage: row.on_submit_message ?? null,
     submitLabel: row.submit_label ?? null,
     saveToMetadata: Boolean(row.save_to_metadata),
+    submitOnce: Boolean(row.submit_once),
     isActive: Boolean(row.is_active),
     submitCount: row.submit_count,
     formType: row.form_type,
@@ -116,6 +117,7 @@ forms.post('/api/forms', async (c) => {
       onSubmitMessage?: string | null;
       submitLabel?: string | null;
       saveToMetadata?: boolean;
+      submitOnce?: boolean;
       formType?: FormType;
       correctAnswers?: Record<string, string | string[]> | null;
       passingScore?: number | null;
@@ -136,6 +138,7 @@ forms.post('/api/forms', async (c) => {
       onSubmitScenarioId: body.onSubmitScenarioId ?? null,
       onSubmitMessage: body.onSubmitMessage ?? null,
       submitLabel: body.submitLabel ?? null,
+      submitOnce: body.submitOnce,
       saveToMetadata: body.saveToMetadata,
       formType: body.formType ?? 'generic',
       correctAnswers: body.correctAnswers ? JSON.stringify(body.correctAnswers) : null,
@@ -165,6 +168,7 @@ forms.put('/api/forms/:id', async (c) => {
       onSubmitMessage?: string | null;
       submitLabel?: string | null;
       saveToMetadata?: boolean;
+      submitOnce?: boolean;
       isActive?: boolean;
       formType?: FormType;
       correctAnswers?: Record<string, string | string[]> | null;
@@ -182,6 +186,7 @@ forms.put('/api/forms/:id', async (c) => {
       onSubmitScenarioId: body.onSubmitScenarioId,
       onSubmitMessage: 'onSubmitMessage' in body ? body.onSubmitMessage : undefined,
       submitLabel: body.submitLabel,
+      submitOnce: 'submitOnce' in body ? body.submitOnce : undefined,
       saveToMetadata: body.saveToMetadata,
       isActive: body.isActive,
       formType: body.formType,
@@ -310,6 +315,20 @@ forms.post('/api/forms/:id/submit', async (c) => {
       const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
       if (friend) {
         friendId = friend.id;
+      }
+    }
+
+    // 1人1回まで制限：既に同じ友達からの提出があれば「既に回答済み」を返す
+    if (form.submit_once && friendId) {
+      const existing = await c.env.DB
+        .prepare(`SELECT id FROM form_submissions WHERE form_id = ? AND friend_id = ? LIMIT 1`)
+        .bind(formId, friendId)
+        .first<{ id: string }>();
+      if (existing) {
+        return c.json({
+          success: true,
+          data: { alreadySubmitted: true, message: '既に回答されています' },
+        });
       }
     }
 
