@@ -107,6 +107,8 @@ function Inner() {
         description: event.description,
         slug: event.slug,
         isActive: event.isActive,
+        funnelRole: event.funnelRole ?? null,
+        eventFormat: event.eventFormat ?? null,
         consultationConfig: config,
       })
       if (res.success) {
@@ -186,6 +188,36 @@ function Inner() {
           <div className="flex items-center gap-2">
             <input id="isActive" type="checkbox" checked={event.isActive} onChange={e => setEvent({ ...event, isActive: e.target.checked })} className="w-4 h-4" />
             <label htmlFor="isActive" className="text-sm text-gray-700">公開する</label>
+          </div>
+
+          {/* KPI / ファネル設定 */}
+          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">ファネル役割（KPI集計用）</label>
+              <select
+                value={event.funnelRole ?? ''}
+                onChange={e => setEvent({ ...event, funnelRole: (e.target.value || null) as 'top' | 'mid' | null })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="">集計対象外</option>
+                <option value="top">top（戦略会議・勉強会など）</option>
+                <option value="mid">mid（個別説明会）</option>
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">/kpi のファネル分析で使用</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">開催形式</label>
+              <select
+                value={event.eventFormat ?? ''}
+                onChange={e => setEvent({ ...event, eventFormat: (e.target.value || null) as 'seminar' | 'individual' | null })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="">未設定</option>
+                <option value="seminar">セミナー（集団）</option>
+                <option value="individual">個別</option>
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">後で「セミナー vs 個別」のCVR比較に使う</p>
+            </div>
           </div>
         </section>
 

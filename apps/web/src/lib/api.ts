@@ -429,6 +429,8 @@ export const api = {
         description: string | null
         slug: string
         isActive: boolean
+        funnelRole: 'top' | 'mid' | null
+        eventFormat: 'seminar' | 'individual' | null
         consultationConfig: Partial<ConsultationConfig>
       }>,
     ) =>
@@ -443,6 +445,14 @@ export const api = {
       fetchApi<ApiResponse<{ id: string; status: string }>>(`/api/event-bookings/${bookingId}/cancel`, {
         method: 'POST',
       }),
+  },
+  kpi: {
+    funnelSummary: (params?: { lineAccountId?: string; days?: number }) =>
+      fetchApi<ApiResponse<KpiFunnelSummary>>(
+        '/api/kpi/funnel-summary' + (params ? '?' + new URLSearchParams(
+          Object.fromEntries(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
+        ) : ''),
+      ),
   },
   googleCalendar: {
     list: () =>
@@ -971,8 +981,30 @@ export interface EventItem {
   eventType: 'consultation' | 'seminar'
   slug: string
   isActive: boolean
+  funnelRole?: 'top' | 'mid' | null
+  eventFormat?: 'seminar' | 'individual' | null
   createdAt: string
   updatedAt: string
+}
+
+export interface KpiFunnelSummary {
+  period: { from: string; to: string; days: number }
+  overall: {
+    friendsAdded: number
+    topUniqueFriends: number
+    midUniqueFriends: number
+    closedFriends: number
+    revenue: number
+  }
+  topBreakdown: {
+    eventId: string
+    name: string
+    eventFormat: 'seminar' | 'individual' | null
+    topUniqueFriends: number
+    midUniqueFriends: number
+    closedFriends: number
+    revenue: number
+  }[]
 }
 
 export interface ConsultationConfig {

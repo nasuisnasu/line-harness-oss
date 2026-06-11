@@ -44,6 +44,8 @@ interface DbEvent {
   event_type: 'consultation' | 'seminar';
   slug: string;
   is_active: number;
+  funnel_role: 'top' | 'mid' | null;
+  event_format: 'seminar' | 'individual' | null;
   created_at: string;
   updated_at: string;
 }
@@ -95,6 +97,8 @@ function serializeEvent(row: DbEvent) {
     eventType: row.event_type,
     slug: row.slug,
     isActive: !!row.is_active,
+    funnelRole: row.funnel_role ?? null,
+    eventFormat: row.event_format ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -286,6 +290,8 @@ events.put('/api/events/:id', async (c) => {
       description?: string | null;
       slug?: string;
       isActive?: boolean;
+      funnelRole?: 'top' | 'mid' | null;
+      eventFormat?: 'seminar' | 'individual' | null;
       consultationConfig?: Partial<{
         durationMinutes: number;
         bufferBeforeMinutes: number;
@@ -320,6 +326,8 @@ events.put('/api/events/:id', async (c) => {
     if ('description' in body) { sets.push('description = ?'); vals.push(body.description ?? null); }
     if (body.slug !== undefined) { sets.push('slug = ?'); vals.push(body.slug); }
     if (body.isActive !== undefined) { sets.push('is_active = ?'); vals.push(body.isActive ? 1 : 0); }
+    if ('funnelRole' in body) { sets.push('funnel_role = ?'); vals.push(body.funnelRole ?? null); }
+    if ('eventFormat' in body) { sets.push('event_format = ?'); vals.push(body.eventFormat ?? null); }
     if (sets.length > 0) {
       sets.push('updated_at = ?');
       vals.push(jstNow());

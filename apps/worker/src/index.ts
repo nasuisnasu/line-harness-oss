@@ -38,6 +38,7 @@ import { uploads } from './routes/uploads.js';
 import { actions } from './routes/actions.js';
 import { autoReplies } from './routes/auto-replies.js';
 import { events as eventsRoute } from './routes/events.js';
+import { kpi } from './routes/kpi.js';
 
 export type Env = {
   Bindings: {
@@ -96,6 +97,7 @@ app.route('/', uploads);
 app.route('/', actions);
 app.route('/', autoReplies);
 app.route('/', eventsRoute);
+app.route('/', kpi);
 
 // 404 fallback
 app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));
