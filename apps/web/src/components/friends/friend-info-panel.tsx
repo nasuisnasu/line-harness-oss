@@ -156,21 +156,15 @@ export default function FriendInfoPanel({ friendId, compact = false }: Props) {
         </div>
       </div>
 
-      {/* 親子情報 */}
-      {family && (family.parents.length > 0 || family.children.length > 0) && (
+      {/* 親子情報（保護者側にのみ表示） */}
+      {family && family.children.length > 0 && (
         <div>
-          <p className={`${labelCls} font-semibold text-gray-500 mb-1`}>親子関係</p>
+          <p className={`${labelCls} font-semibold text-gray-500 mb-1`}>関係</p>
           <div className="space-y-1">
-            {family.parents.map((p) => (
-              <div key={p.id} className="text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                <span className="text-amber-700 font-semibold">{p.parentName || p.displayName || '名前未設定'}</span>
-                <span className="text-amber-600 ml-1">さん（保護者）の子</span>
-              </div>
-            ))}
             {family.children.map((c) => (
               <div key={c.id} className="text-xs bg-blue-50 border border-blue-200 rounded px-2 py-1.5">
                 <span className="text-blue-700 font-semibold">{c.studentName || c.displayName || '名前未設定'}</span>
-                <span className="text-blue-600 ml-1">さん（生徒）の親</span>
+                <span className="text-blue-600 ml-1">の親</span>
               </div>
             ))}
           </div>
