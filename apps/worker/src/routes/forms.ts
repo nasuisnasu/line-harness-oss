@@ -33,6 +33,7 @@ function serializeForm(row: DbForm, opts: { includeAnswers?: boolean } = {}) {
     submitLabel: row.submit_label ?? null,
     saveToMetadata: Boolean(row.save_to_metadata),
     submitOnce: Boolean(row.submit_once),
+    lineAccountId: row.line_account_id ?? null,
     isActive: Boolean(row.is_active),
     submitCount: row.submit_count,
     formType: row.form_type,
@@ -118,6 +119,7 @@ forms.post('/api/forms', async (c) => {
       submitLabel?: string | null;
       saveToMetadata?: boolean;
       submitOnce?: boolean;
+      lineAccountId?: string | null;
       formType?: FormType;
       correctAnswers?: Record<string, string | string[]> | null;
       passingScore?: number | null;
@@ -140,6 +142,7 @@ forms.post('/api/forms', async (c) => {
       submitLabel: body.submitLabel ?? null,
       submitOnce: body.submitOnce,
       saveToMetadata: body.saveToMetadata,
+      lineAccountId: body.lineAccountId ?? null,
       formType: body.formType ?? 'generic',
       correctAnswers: body.correctAnswers ? JSON.stringify(body.correctAnswers) : null,
       passingScore: body.passingScore ?? null,
@@ -169,6 +172,7 @@ forms.put('/api/forms/:id', async (c) => {
       submitLabel?: string | null;
       saveToMetadata?: boolean;
       submitOnce?: boolean;
+      lineAccountId?: string | null;
       isActive?: boolean;
       formType?: FormType;
       correctAnswers?: Record<string, string | string[]> | null;
@@ -187,6 +191,7 @@ forms.put('/api/forms/:id', async (c) => {
       onSubmitMessage: 'onSubmitMessage' in body ? body.onSubmitMessage : undefined,
       submitLabel: body.submitLabel,
       submitOnce: 'submitOnce' in body ? body.submitOnce : undefined,
+      lineAccountId: 'lineAccountId' in body ? body.lineAccountId : undefined,
       saveToMetadata: body.saveToMetadata,
       isActive: body.isActive,
       formType: body.formType,

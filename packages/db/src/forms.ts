@@ -19,6 +19,7 @@ export interface Form {
   submit_once: number;
   is_active: number;
   submit_count: number;
+  line_account_id: string | null;
   form_type: FormType;
   correct_answers: string | null; // JSON: { [fieldName]: string | string[] }
   passing_score: number | null;
@@ -66,6 +67,7 @@ export interface CreateFormInput {
   submitLabel?: string | null;
   saveToMetadata?: boolean;
   submitOnce?: boolean;
+  lineAccountId?: string | null;
   formType?: FormType;
   correctAnswers?: string | null;
   passingScore?: number | null;
@@ -83,8 +85,8 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
          (id, name, display_name, description, fields, on_submit_tag_id, on_submit_scenario_id,
           on_submit_message, submit_label, save_to_metadata, submit_once, is_active, submit_count,
           form_type, correct_answers, passing_score, pass_tag_id, fail_tag_id,
-          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)`,
+          line_account_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -103,6 +105,7 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
       input.passingScore ?? null,
       input.passTagId ?? null,
       input.failTagId ?? null,
+      input.lineAccountId ?? null,
       now,
       now,
     )
@@ -123,6 +126,7 @@ export interface UpdateFormInput {
   saveToMetadata?: boolean;
   submitOnce?: boolean;
   isActive?: boolean;
+  lineAccountId?: string | null;
   formType?: FormType;
   correctAnswers?: string | null;
   passingScore?: number | null;
@@ -159,6 +163,7 @@ export async function updateForm(
            passing_score = ?,
            pass_tag_id = ?,
            fail_tag_id = ?,
+           line_account_id = ?,
            updated_at = ?
        WHERE id = ?`,
     )
@@ -183,6 +188,7 @@ export async function updateForm(
       'passingScore' in input ? (input.passingScore ?? null) : existing.passing_score,
       'passTagId' in input ? (input.passTagId ?? null) : existing.pass_tag_id,
       'failTagId' in input ? (input.failTagId ?? null) : existing.fail_tag_id,
+      'lineAccountId' in input ? (input.lineAccountId ?? null) : existing.line_account_id,
       now,
       id,
     )

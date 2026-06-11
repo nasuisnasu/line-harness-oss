@@ -21,6 +21,7 @@ function serializeLineAccount(row: DbLineAccount) {
     testFriendId: row.test_friend_id ?? null,
     pictureUrl: row.picture_url ?? null,
     profileSyncedAt: row.profile_synced_at ?? null,
+    liffId: row.liff_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -95,6 +96,7 @@ lineAccounts.put('/api/line-accounts/:id', async (c) => {
       isActive?: boolean;
       welcomeFallbackMessage?: string | null;
       testFriendId?: string | null;
+      liffId?: string | null;
     }>();
 
     const updated = await updateLineAccount(c.env.DB, id, {
@@ -104,6 +106,7 @@ lineAccounts.put('/api/line-accounts/:id', async (c) => {
       is_active: body.isActive !== undefined ? (body.isActive ? 1 : 0) : undefined,
       welcome_fallback_message: body.welcomeFallbackMessage,
       test_friend_id: body.testFriendId,
+      liff_id: body.liffId,
     });
 
     if (!updated) {

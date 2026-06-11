@@ -37,6 +37,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
   const [submitLabel, setSubmitLabel] = useState('')
   const [saveToMetadata, setSaveToMetadata] = useState(true)
   const [submitOnce, setSubmitOnce] = useState(false)
+  const [lineAccountId, setLineAccountId] = useState<string>('')
   const [isActive, setIsActive] = useState(true)
   const [tags, setTags] = useState<{ id: string; name: string; color?: string; groupName?: string | null }[]>([])
   const [scenarios, setScenarios] = useState<{ id: string; name: string; groupName?: string | null }[]>([])
@@ -45,7 +46,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
   const [error, setError] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [editingTagsForField, setEditingTagsForField] = useState<{ idx: number; opt: string } | null>(null)
-  const { selectedAccount } = useAccount()
+  const { selectedAccount, accounts } = useAccount()
 
   useEffect(() => {
     // Always scope tag/scenario pickers to the currently selected LINE account.
@@ -72,6 +73,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
         setSubmitLabel(res.data.submitLabel ?? '')
         setSaveToMetadata(res.data.saveToMetadata)
         setSubmitOnce(Boolean(res.data.submitOnce))
+        setLineAccountId(res.data.lineAccountId ?? '')
         setIsActive(res.data.isActive)
       } else {
         setError(res.error)
@@ -117,6 +119,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
         submitLabel: submitLabel || null,
         saveToMetadata,
         submitOnce,
+        lineAccountId: lineAccountId || null,
         isActive,
       }
       const res = id
@@ -385,6 +388,20 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
               <input type="checkbox" checked={submitOnce} onChange={e => setSubmitOnce(e.target.checked)} />
               1人1回まで（既に回答済みの友達は「既に回答されています」と表示）
             </label>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">帰属LINEアカウント（共有URL生成に使用）</label>
+              <select
+                value={lineAccountId}
+                onChange={e => setLineAccountId(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-white"
+              >
+                <option value="">未設定（/f URL を使用）</option>
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}{a.liffId ? '' : '（LIFF未設定）'}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">設定するとフォーム共有URLが LIFF URL（ベタ打ち共有OK / friend ID 不要）になります。LIFF ID はアカウント編集で別途設定が必要です。</p>
+            </div>
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
               フォームを公開する（チェックを外すと回答受付停止）

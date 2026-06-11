@@ -333,6 +333,8 @@ export interface LineAccount {
   pictureUrl?: string | null;
   /** 最終プロフィール同期日時 */
   profileSyncedAt?: string | null;
+  /** フォーム・LIFFページの共有URL生成に使う LIFF ID（例: 2006855304-UfNPHFOn） */
+  liffId?: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
   /** 更新日時 (ISO 8601) */

@@ -14,6 +14,7 @@ export interface LineAccount {
   test_friend_id: string | null;
   picture_url: string | null;
   profile_synced_at: string | null;
+  liff_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -72,7 +73,7 @@ export async function getLineAccountByChannelId(
 }
 
 export type UpdateLineAccountInput = Partial<
-  Pick<LineAccount, 'name' | 'channel_access_token' | 'channel_secret' | 'is_active' | 'welcome_fallback_message' | 'test_friend_id' | 'picture_url' | 'profile_synced_at'>
+  Pick<LineAccount, 'name' | 'channel_access_token' | 'channel_secret' | 'is_active' | 'welcome_fallback_message' | 'test_friend_id' | 'picture_url' | 'profile_synced_at' | 'liff_id'>
 >;
 
 export async function updateLineAccount(
@@ -114,6 +115,10 @@ export async function updateLineAccount(
   if (updates.profile_synced_at !== undefined) {
     fields.push('profile_synced_at = ?');
     values.push(updates.profile_synced_at ?? null);
+  }
+  if (updates.liff_id !== undefined) {
+    fields.push('liff_id = ?');
+    values.push(updates.liff_id ?? null);
   }
 
   if (fields.length === 0) return getLineAccountById(db, id);

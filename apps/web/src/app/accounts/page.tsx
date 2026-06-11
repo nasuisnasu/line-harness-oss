@@ -12,6 +12,7 @@ interface LineAccountListItem {
   isActive: boolean
   welcomeFallbackMessage: string | null
   testFriendId: string | null
+  liffId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -47,7 +48,7 @@ export default function AccountsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ channelId: '', name: '', channelAccessToken: '', channelSecret: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', channelAccessToken: '', channelSecret: '', welcomeFallbackMessage: '', testFriendId: '' })
+  const [editForm, setEditForm] = useState({ name: '', channelAccessToken: '', channelSecret: '', welcomeFallbackMessage: '', testFriendId: '', liffId: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editFriends, setEditFriends] = useState<FriendOption[]>([])
 
@@ -88,7 +89,7 @@ export default function AccountsPage() {
 
   const openEdit = async (account: LineAccountListItem) => {
     setEditingId(account.id)
-    setEditForm({ name: account.name, channelAccessToken: '', channelSecret: '', welcomeFallbackMessage: account.welcomeFallbackMessage ?? '', testFriendId: account.testFriendId ?? '' })
+    setEditForm({ name: account.name, channelAccessToken: '', channelSecret: '', welcomeFallbackMessage: account.welcomeFallbackMessage ?? '', testFriendId: account.testFriendId ?? '', liffId: account.liffId ?? '' })
     try {
       const res = await api.friends.list({ lineAccountId: account.id, limit: '500' })
       if (res.success) {
@@ -105,6 +106,7 @@ export default function AccountsPage() {
         name: editForm.name,
         welcomeFallbackMessage: editForm.welcomeFallbackMessage || null,
         testFriendId: editForm.testFriendId || null,
+        liffId: editForm.liffId.trim() || null,
       }
       if (editForm.channelAccessToken) payload.channelAccessToken = editForm.channelAccessToken
       if (editForm.channelSecret) payload.channelSecret = editForm.channelSecret
@@ -254,6 +256,11 @@ export default function AccountsPage() {
                         <option key={f.id} value={f.id}>{f.displayName ?? '(名無し)'}</option>
                       ))}
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">LIFF ID（フォーム等の共有URL生成に使用）</label>
+                    <input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" placeholder="例：2006855304-UfNPHFOn" value={editForm.liffId} onChange={e => setEditForm({ ...editForm, liffId: e.target.value })} />
+                    <p className="text-[11px] text-gray-400 mt-1">LINE Developers の LIFF アプリ ID を貼り付けてください。設定するとフォーム共有URLが LIFF URL（friend ID 不要）になります。</p>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button onClick={handleSaveEdit} disabled={editSaving} className="px-3 py-1 text-sm text-white rounded disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>{editSaving ? '保存中...' : '保存'}</button>

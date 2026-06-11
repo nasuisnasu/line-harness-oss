@@ -3,9 +3,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { api, type FormItem } from '@/lib/api'
+import { useAccount } from '@/lib/account-context'
 import Header from '@/components/layout/header'
 
 export default function FormsPage() {
+  const { accounts } = useAccount()
   const [forms, setForms] = useState<FormItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -32,11 +34,19 @@ export default function FormsPage() {
     load()
   }
 
-  const copyUrl = async (id: string) => {
-    const url = `${window.location.origin}/f?id=${id}&friend={friendId}`
+  const copyUrl = async (form: FormItem) => {
+    // 帰属LINEアカウントに LIFF ID が設定されている → LIFF URL（ベタ打ち共有OK）
+    const acc = form.lineAccountId ? accounts.find(a => a.id === form.lineAccountId) : null
+    const url = acc?.liffId
+      ? `https://liff.line.me/${acc.liffId}?page=form&id=${form.id}`
+      : `${window.location.origin}/f?id=${form.id}&friend={friendId}`
     try {
       await navigator.clipboard.writeText(url)
-      alert('回答URLをコピーしました')
+      if (!acc?.liffId) {
+        alert('回答URLをコピーしました（{friendId} 部分は LINE Push 配信時に自動置換されます。ベタ打ちで共有したい場合はアカウント編集で LIFF ID を設定してください）')
+      } else {
+        alert('回答URLをコピーしました（ベタ打ち共有OK）')
+      }
     } catch {
       prompt('回答URL', url)
     }
@@ -92,7 +102,7 @@ export default function FormsPage() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => copyUrl(form.id)}
+                    onClick={() => copyUrl(form)}
                     className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
                   >
                     URLコピー

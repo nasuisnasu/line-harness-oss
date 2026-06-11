@@ -332,7 +332,7 @@ export const api = {
       fetchApi<ApiResponse<LineAccount>>(`/api/line-accounts/${id}/sync-profile`, {
         method: 'POST',
       }),
-    update: (id: string, data: Partial<Pick<LineAccount, 'name' | 'channelAccessToken' | 'channelSecret' | 'isActive'>>) =>
+    update: (id: string, data: Partial<Pick<LineAccount, 'name' | 'channelAccessToken' | 'channelSecret' | 'isActive' | 'liffId'>>) =>
       fetchApi<ApiResponse<LineAccount>>(`/api/line-accounts/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -845,6 +845,7 @@ export const api = {
       submitLabel?: string | null
       saveToMetadata?: boolean
       submitOnce?: boolean
+      lineAccountId?: string | null
       isActive?: boolean
       formType?: 'generic' | 'daily_report' | 'test'
       correctAnswers?: Record<string, string | string[]> | null
@@ -866,6 +867,7 @@ export const api = {
       submitLabel?: string | null
       saveToMetadata?: boolean
       submitOnce?: boolean
+      lineAccountId?: string | null
       isActive?: boolean
       formType?: 'generic' | 'daily_report' | 'test'
       correctAnswers?: Record<string, string | string[]> | null
@@ -929,6 +931,8 @@ export interface FormItem {
   saveToMetadata: boolean
   /** 1人1回まで制限 */
   submitOnce?: boolean
+  /** 帰属するLINEアカウント。共有LIFF URL生成に使う */
+  lineAccountId?: string | null
   isActive: boolean
   submitCount: number
   createdAt: string
