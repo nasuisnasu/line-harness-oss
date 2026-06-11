@@ -33,6 +33,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
   const [fields, setFields] = useState<FormFieldItem[]>([newField()])
   const [tagId, setTagId] = useState('')
   const [scenarioId, setScenarioId] = useState('')
+  const [submitMessage, setSubmitMessage] = useState('')
   const [submitLabel, setSubmitLabel] = useState('')
   const [saveToMetadata, setSaveToMetadata] = useState(true)
   const [isActive, setIsActive] = useState(true)
@@ -66,6 +67,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
         setFields(res.data.fields.length > 0 ? res.data.fields : [newField()])
         setTagId(res.data.onSubmitTagId ?? '')
         setScenarioId(res.data.onSubmitScenarioId ?? '')
+        setSubmitMessage(res.data.onSubmitMessage ?? '')
         setSubmitLabel(res.data.submitLabel ?? '')
         setSaveToMetadata(res.data.saveToMetadata)
         setIsActive(res.data.isActive)
@@ -109,6 +111,7 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
         fields,
         onSubmitTagId: tagId || null,
         onSubmitScenarioId: scenarioId || null,
+        onSubmitMessage: submitMessage.trim() ? submitMessage : null,
         submitLabel: submitLabel || null,
         saveToMetadata,
         isActive,
@@ -359,6 +362,17 @@ export default function FormEditor({ id, onClose }: { id: string | null; onClose
                 <option value="">なし</option>
                 {scenarios.map(s => <option key={s.id} value={s.id}>{withGroup(s.name, s.groupName)}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">送信時のテキスト返信（任意）</label>
+              <textarea
+                value={submitMessage}
+                onChange={e => setSubmitMessage(e.target.value)}
+                rows={4}
+                placeholder="例：受講登録ありがとうございます！担当よりすぐにご連絡します。"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm resize-y"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">シナリオとは独立して、回答直後に1通だけLINEで送ります。空欄なら送りません。</p>
             </div>
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={saveToMetadata} onChange={e => setSaveToMetadata(e.target.checked)} />

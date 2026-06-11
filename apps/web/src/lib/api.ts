@@ -833,6 +833,7 @@ export const api = {
       fields: FormFieldItem[]
       onSubmitTagId?: string | null
       onSubmitScenarioId?: string | null
+      onSubmitMessage?: string | null
       submitLabel?: string | null
       saveToMetadata?: boolean
       isActive?: boolean
@@ -852,6 +853,7 @@ export const api = {
       fields?: FormFieldItem[]
       onSubmitTagId?: string | null
       onSubmitScenarioId?: string | null
+      onSubmitMessage?: string | null
       submitLabel?: string | null
       saveToMetadata?: boolean
       isActive?: boolean
@@ -910,6 +912,8 @@ export interface FormItem {
   fields: FormFieldItem[]
   onSubmitTagId: string | null
   onSubmitScenarioId: string | null
+  /** 送信時にLINEへ送るプレーンテキスト返信。null=送らない */
+  onSubmitMessage?: string | null
   /** 送信ボタンのCTA文言 */
   submitLabel?: string | null
   saveToMetadata: boolean

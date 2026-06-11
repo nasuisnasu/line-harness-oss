@@ -29,6 +29,7 @@ function serializeForm(row: DbForm, opts: { includeAnswers?: boolean } = {}) {
     fields: JSON.parse(row.fields || '[]') as unknown[],
     onSubmitTagId: row.on_submit_tag_id,
     onSubmitScenarioId: row.on_submit_scenario_id,
+    onSubmitMessage: row.on_submit_message ?? null,
     submitLabel: row.submit_label ?? null,
     saveToMetadata: Boolean(row.save_to_metadata),
     isActive: Boolean(row.is_active),
@@ -112,6 +113,7 @@ forms.post('/api/forms', async (c) => {
       fields?: unknown[];
       onSubmitTagId?: string | null;
       onSubmitScenarioId?: string | null;
+      onSubmitMessage?: string | null;
       submitLabel?: string | null;
       saveToMetadata?: boolean;
       formType?: FormType;
@@ -132,6 +134,7 @@ forms.post('/api/forms', async (c) => {
       fields: JSON.stringify(body.fields ?? []),
       onSubmitTagId: body.onSubmitTagId ?? null,
       onSubmitScenarioId: body.onSubmitScenarioId ?? null,
+      onSubmitMessage: body.onSubmitMessage ?? null,
       submitLabel: body.submitLabel ?? null,
       saveToMetadata: body.saveToMetadata,
       formType: body.formType ?? 'generic',
@@ -159,6 +162,7 @@ forms.put('/api/forms/:id', async (c) => {
       fields?: unknown[];
       onSubmitTagId?: string | null;
       onSubmitScenarioId?: string | null;
+      onSubmitMessage?: string | null;
       submitLabel?: string | null;
       saveToMetadata?: boolean;
       isActive?: boolean;
@@ -176,6 +180,7 @@ forms.put('/api/forms/:id', async (c) => {
       fields: body.fields !== undefined ? JSON.stringify(body.fields) : undefined,
       onSubmitTagId: body.onSubmitTagId,
       onSubmitScenarioId: body.onSubmitScenarioId,
+      onSubmitMessage: 'onSubmitMessage' in body ? body.onSubmitMessage : undefined,
       submitLabel: body.submitLabel,
       saveToMetadata: body.saveToMetadata,
       isActive: body.isActive,
@@ -401,6 +406,37 @@ forms.post('/api/forms/:id/submit', async (c) => {
           processStepDeliveries(c.env.DB, lineClient, c.env.TRACKING_BASE_URL).catch((err) =>
             console.error('[forms.submit] immediate processStepDeliveries failed:', err),
           ),
+        );
+      }
+
+      // Send a plain-text reply if configured. Uses the friend's bound LINE account token.
+      if (form.on_submit_message && form.on_submit_message.trim()) {
+        const text = form.on_submit_message;
+        c.executionCtx.waitUntil(
+          (async () => {
+            try {
+              const friend = await getFriendById(c.env.DB, friendId);
+              if (!friend) return;
+              let token: string = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+              if (friend.line_account_id) {
+                const { getLineAccountById } = await import('@line-crm/db');
+                const acc = await getLineAccountById(c.env.DB, friend.line_account_id);
+                if (acc) token = acc.channel_access_token;
+              }
+              const client = new LineClient(token);
+              await client.pushTextMessage(friend.line_user_id, text);
+              const logId = crypto.randomUUID();
+              await c.env.DB
+                .prepare(
+                  `INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at)
+                   VALUES (?, ?, 'outgoing', 'text', ?, ?)`,
+                )
+                .bind(logId, friend.id, text, jstNow())
+                .run();
+            } catch (err) {
+              console.error('[forms.submit] on_submit_message push failed:', err);
+            }
+          })(),
         );
       }
     }

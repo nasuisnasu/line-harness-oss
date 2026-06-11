@@ -13,6 +13,7 @@ export interface Form {
   fields: string; // JSON string of FormField[]
   on_submit_tag_id: string | null;
   on_submit_scenario_id: string | null;
+  on_submit_message: string | null;
   submit_label: string | null;
   save_to_metadata: number;
   is_active: number;
@@ -60,6 +61,7 @@ export interface CreateFormInput {
   fields: string; // JSON string
   onSubmitTagId?: string | null;
   onSubmitScenarioId?: string | null;
+  onSubmitMessage?: string | null;
   submitLabel?: string | null;
   saveToMetadata?: boolean;
   formType?: FormType;
@@ -77,10 +79,10 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
     .prepare(
       `INSERT INTO forms
          (id, name, display_name, description, fields, on_submit_tag_id, on_submit_scenario_id,
-          submit_label, save_to_metadata, is_active, submit_count,
+          on_submit_message, submit_label, save_to_metadata, is_active, submit_count,
           form_type, correct_answers, passing_score, pass_tag_id, fail_tag_id,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -90,6 +92,7 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
       input.fields,
       input.onSubmitTagId ?? null,
       input.onSubmitScenarioId ?? null,
+      input.onSubmitMessage ?? null,
       input.submitLabel ?? null,
       input.saveToMetadata !== false ? 1 : 0,
       input.formType ?? 'generic',
@@ -112,6 +115,7 @@ export interface UpdateFormInput {
   fields?: string;
   onSubmitTagId?: string | null;
   onSubmitScenarioId?: string | null;
+  onSubmitMessage?: string | null;
   submitLabel?: string | null;
   saveToMetadata?: boolean;
   isActive?: boolean;
@@ -141,6 +145,7 @@ export async function updateForm(
            fields = ?,
            on_submit_tag_id = ?,
            on_submit_scenario_id = ?,
+           on_submit_message = ?,
            submit_label = ?,
            save_to_metadata = ?,
            is_active = ?,
@@ -161,6 +166,7 @@ export async function updateForm(
       'onSubmitScenarioId' in input
         ? (input.onSubmitScenarioId ?? null)
         : existing.on_submit_scenario_id,
+      'onSubmitMessage' in input ? (input.onSubmitMessage ?? null) : existing.on_submit_message,
       'submitLabel' in input ? (input.submitLabel ?? null) : existing.submit_label,
       'saveToMetadata' in input
         ? (input.saveToMetadata !== false ? 1 : 0)
