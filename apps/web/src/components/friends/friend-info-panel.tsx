@@ -156,6 +156,24 @@ export default function FriendInfoPanel({ friendId, compact = false }: Props) {
         </div>
       </div>
 
+      {/* 受講生フォーム情報（氏名 + 属性バッジ） */}
+      {family && (family.myName || family.role) && (
+        <div>
+          <p className={`${labelCls} font-semibold text-gray-500 mb-1`}>受講生情報</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {family.myName && (
+              <span className="text-sm font-semibold text-gray-900">{family.myName}</span>
+            )}
+            {family.role === '生徒' && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">生徒</span>
+            )}
+            {family.role === '保護者' && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">保護者</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 親子情報（保護者側にのみ表示） */}
       {family && family.children.length > 0 && (
         <div>
