@@ -86,8 +86,8 @@ chats.get('/api/chats', async (c) => {
     const tagId = c.req.query('tagId') ?? undefined;
     const q = c.req.query('q')?.trim() || undefined;
 
-    // JOIN friends to get display_name, picture_url, and account filter
-    let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id
+    // JOIN friends to get display_name, picture_url, metadata, and account filter
+    let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id, f.line_account_id, f.metadata
                FROM chats c
                LEFT JOIN friends f ON c.friend_id = f.id`;
     const conditions: string[] = [];
@@ -124,12 +124,31 @@ chats.get('/api/chats', async (c) => {
       : c.env.DB.prepare(sql);
     const result = await stmt.all();
 
+    // 受講生専用 (5185b739...) のフレンドはフォームの 氏名 + 属性 を優先表示。
+    // 例: 「山田太郎（生徒）」「佐藤花子（保護者）」。未記入なら LINE 表示名にフォールバック。
+    const JUKOSEI_ACCOUNT_ID = '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e';
+    const resolveName = (ch: Record<string, unknown>): string => {
+      const lineName = (ch.display_name as string) || '名前なし';
+      if (ch.line_account_id !== JUKOSEI_ACCOUNT_ID) return lineName;
+      try {
+        const meta = JSON.parse((ch.metadata as string) || '{}') as Record<string, unknown>;
+        const name = String(meta.field_name ?? '').trim();
+        const role = String(meta.field_21ff99 ?? '').trim();
+        if (!name && !role) return lineName;
+        if (name && role) return `${name}（${role}）`;
+        if (name) return name;
+        return lineName;
+      } catch {
+        return lineName;
+      }
+    };
+
     return c.json({
       success: true,
       data: result.results.map((ch: Record<string, unknown>) => ({
         id: ch.id,
         friendId: ch.friend_id,
-        friendName: ch.display_name || '名前なし',
+        friendName: resolveName(ch),
         friendPictureUrl: ch.picture_url || null,
         operatorId: ch.operator_id,
         status: ch.status,
@@ -152,9 +171,9 @@ chats.get('/api/chats/:id', async (c) => {
 
     // 友だち情報を取得
     const friend = await c.env.DB
-      .prepare(`SELECT display_name, picture_url, line_user_id FROM friends WHERE id = ?`)
+      .prepare(`SELECT display_name, picture_url, line_user_id, line_account_id, metadata FROM friends WHERE id = ?`)
       .bind(item.friend_id)
-      .first<{ display_name: string | null; picture_url: string | null; line_user_id: string }>();
+      .first<{ display_name: string | null; picture_url: string | null; line_user_id: string; line_account_id: string | null; metadata: string | null }>();
 
     // チャットに関連するメッセージログも取得
     const messages = await c.env.DB
@@ -162,12 +181,25 @@ chats.get('/api/chats/:id', async (c) => {
       .bind(item.friend_id)
       .all();
 
+    // 受講生専用 のフレンドは氏名+属性を優先表示
+    const JUKOSEI_ID = '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e';
+    let resolvedName = friend?.display_name || '名前なし';
+    if (friend?.line_account_id === JUKOSEI_ID) {
+      try {
+        const meta = JSON.parse(friend.metadata || '{}') as Record<string, unknown>;
+        const fName = String(meta.field_name ?? '').trim();
+        const role = String(meta.field_21ff99 ?? '').trim();
+        if (fName && role) resolvedName = `${fName}（${role}）`;
+        else if (fName) resolvedName = fName;
+      } catch { /* ignore */ }
+    }
+
     return c.json({
       success: true,
       data: {
         id: item.id,
         friendId: item.friend_id,
-        friendName: friend?.display_name || '名前なし',
+        friendName: resolvedName,
         friendPictureUrl: friend?.picture_url || null,
         operatorId: item.operator_id,
         status: item.status,
