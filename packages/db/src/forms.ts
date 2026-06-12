@@ -42,9 +42,31 @@ export interface FormSubmission {
 
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 
-export async function getForms(db: D1Database): Promise<Form[]> {
+export async function getForms(
+  db: D1Database,
+  opts: { lineAccountId?: string | null } = {},
+): Promise<Form[]> {
+  // lineAccountId 指定時: そのアカウントに紐付くもの + 未割当(NULL)を返す
+  // 未指定時: 全て
+  if (opts.lineAccountId === undefined) {
+    const result = await db
+      .prepare(`SELECT * FROM forms ORDER BY created_at DESC`)
+      .all<Form>();
+    return result.results;
+  }
+  if (opts.lineAccountId === null) {
+    const result = await db
+      .prepare(`SELECT * FROM forms WHERE line_account_id IS NULL ORDER BY created_at DESC`)
+      .all<Form>();
+    return result.results;
+  }
   const result = await db
-    .prepare(`SELECT * FROM forms ORDER BY created_at DESC`)
+    .prepare(
+      `SELECT * FROM forms
+       WHERE line_account_id = ? OR line_account_id IS NULL
+       ORDER BY created_at DESC`,
+    )
+    .bind(opts.lineAccountId)
     .all<Form>();
   return result.results;
 }

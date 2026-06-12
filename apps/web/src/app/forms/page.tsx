@@ -7,7 +7,7 @@ import { useAccount } from '@/lib/account-context'
 import Header from '@/components/layout/header'
 
 export default function FormsPage() {
-  const { accounts } = useAccount()
+  const { accounts, selectedAccount } = useAccount()
   const [forms, setForms] = useState<FormItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -16,7 +16,7 @@ export default function FormsPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.forms.list()
+      const res = await api.forms.list(selectedAccount ? { lineAccountId: selectedAccount.id } : undefined)
       if (res.success) setForms(res.data)
       else setError(res.error)
     } catch {
@@ -24,7 +24,7 @@ export default function FormsPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedAccount])
 
   useEffect(() => { load() }, [load])
 

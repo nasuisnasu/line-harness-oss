@@ -65,7 +65,8 @@ function serializeSubmission(row: DbFormSubmission) {
 // GET /api/forms — list all forms (admin)
 forms.get('/api/forms', async (c) => {
   try {
-    const items = await getForms(c.env.DB);
+    const lineAccountId = c.req.query('lineAccountId');
+    const items = await getForms(c.env.DB, lineAccountId ? { lineAccountId } : {});
     // Admin listing includes answer keys so editors can review/test forms.
     return c.json({ success: true, data: items.map((f) => serializeForm(f, { includeAnswers: true })) });
   } catch (err) {
