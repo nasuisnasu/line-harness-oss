@@ -133,7 +133,7 @@ export default function EntryRoutesPage() {
   const liffIdMap: Record<string, { liffId: string; botId: string }> = {
     'd49a3a13-8169-4b25-a669-3c8a4f4f964d': { liffId: '2009821004-brTkmVVK', botId: '@513qujqi' },
     '40adcb23-277b-4d9d-b6e2-92fde47d31fb': { liffId: '2006855304-UfNPHFOn', botId: '@893nrbyp' },
-    '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e': { liffId: '2009506707-S01wyX6D', botId: '@009rqkeq' },
+    '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e': { liffId: '2009506707-tX5TQVsB', botId: '@009rqkeq' },
   }
   // Get LIFF meta for a specific route (uses route's own line_account_id, falls back to selected account)
   const getRouteMeta = (r: EntryRoute) => {

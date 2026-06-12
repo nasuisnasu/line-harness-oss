@@ -72,8 +72,8 @@ liffRoutes.get('/auth/line', async (c) => {
           'd49a3a13-8169-4b25-a669-3c8a4f4f964d': 'https://liff.line.me/2009821004-brTkmVVK',
           // 40adcb23… → 元英弱ニキ (LIFF 2006855304-UfNPHFOn)
           '40adcb23-277b-4d9d-b6e2-92fde47d31fb': 'https://liff.line.me/2006855304-UfNPHFOn',
-          // 5185b739… → 受験英語 INSIDER (LIFF 2009506707-S01wyX6D)
-          '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e': 'https://liff.line.me/2009506707-S01wyX6D',
+          // 5185b739… → 元英弱ニキ＠受講生専用 (LIFF 2009506707-tX5TQVsB)
+          '5185b739-88d7-40eb-a3b5-f7e61ef8fa5e': 'https://liff.line.me/2009506707-tX5TQVsB',
         };
         const accountLiff = ACCOUNT_LIFF_MAP[route.line_account_id];
         if (accountLiff) liffUrl = accountLiff;
