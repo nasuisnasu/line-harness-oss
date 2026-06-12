@@ -193,6 +193,11 @@ function showOpenInLineApp() {
     ? window.location.search.slice(1)
     : window.location.search;
   const lineAppUrl = `https://liff.line.me/${LIFF_ID}${search ? '?' + search : ''}`;
+  // line:// スキーム経由のフォールバック。新規LIFFは Universal Link
+  // 反映が遅れることがあるので、まず line:// で深いリンクを試して、
+  // それが失敗したら https://liff.line.me/ にフォールバックする。
+  const lineSchemeUrl = `line://app/${LIFF_ID}${search ? '?' + search : ''}`;
+  const friendAddUrl = BOT_BASIC_ID ? `https://line.me/R/ti/p/${BOT_BASIC_ID}` : '';
   const app = document.getElementById('app');
   if (!app) return;
   app.innerHTML = `
@@ -204,15 +209,32 @@ function showOpenInLineApp() {
           このページはLINEアプリ内で動作します。<br>
           下のボタンをタップして、LINEアプリで開き直してください。
         </p>
-        <a href="${lineAppUrl}" style="display:block;width:100%;padding:14px;background:#06C755;color:#fff;text-decoration:none;border-radius:6px;font-weight:700;font-size:15px;letter-spacing:0.04em;">
+        <a href="${lineAppUrl}" id="openLineBtn" style="display:block;width:100%;padding:14px;background:#06C755;color:#fff;text-decoration:none;border-radius:6px;font-weight:700;font-size:15px;letter-spacing:0.04em;">
           LINEアプリで開く
         </a>
+        ${friendAddUrl ? `
+          <p style="font-size:12px;color:#9ca3af;margin:14px 0 8px;">うまく開かない場合：</p>
+          <a href="${friendAddUrl}" style="display:block;width:100%;padding:12px;background:#fff;color:#06C755;text-decoration:none;border-radius:6px;font-weight:600;font-size:13px;border:1px solid #06C755;">
+            先に公式LINEを友だち追加する
+          </a>
+        ` : ''}
         <p style="font-size:11px;color:#9ca3af;line-height:1.6;margin:18px 0 0;">
           ※ LINEアプリがインストールされている必要があります
         </p>
       </div>
     </div>
   `;
+  // タップ時に line:// → 1.5s 後フォールバックで https://liff.line.me/
+  const btn = document.getElementById('openLineBtn') as HTMLAnchorElement | null;
+  if (btn) {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      // line:// で試行
+      window.location.href = lineSchemeUrl;
+      // フォールバック
+      setTimeout(() => { window.location.href = lineAppUrl; }, 1500);
+    });
+  }
 }
 
 function showError(message: string) {
