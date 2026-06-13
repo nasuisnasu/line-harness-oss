@@ -44,6 +44,7 @@ interface DbEvent {
   event_type: 'consultation' | 'seminar';
   slug: string;
   is_active: number;
+  recruitment_paused: number;
   funnel_role: 'top' | 'mid' | null;
   event_format: 'seminar' | 'individual' | null;
   created_at: string;
@@ -97,6 +98,7 @@ function serializeEvent(row: DbEvent) {
     eventType: row.event_type,
     slug: row.slug,
     isActive: !!row.is_active,
+    recruitmentPaused: !!row.recruitment_paused,
     funnelRole: row.funnel_role ?? null,
     eventFormat: row.event_format ?? null,
     createdAt: row.created_at,
@@ -290,6 +292,7 @@ events.put('/api/events/:id', async (c) => {
       description?: string | null;
       slug?: string;
       isActive?: boolean;
+      recruitmentPaused?: boolean;
       funnelRole?: 'top' | 'mid' | null;
       eventFormat?: 'seminar' | 'individual' | null;
       consultationConfig?: Partial<{
@@ -326,6 +329,7 @@ events.put('/api/events/:id', async (c) => {
     if ('description' in body) { sets.push('description = ?'); vals.push(body.description ?? null); }
     if (body.slug !== undefined) { sets.push('slug = ?'); vals.push(body.slug); }
     if (body.isActive !== undefined) { sets.push('is_active = ?'); vals.push(body.isActive ? 1 : 0); }
+    if (body.recruitmentPaused !== undefined) { sets.push('recruitment_paused = ?'); vals.push(body.recruitmentPaused ? 1 : 0); }
     if ('funnelRole' in body) { sets.push('funnel_role = ?'); vals.push(body.funnelRole ?? null); }
     if ('eventFormat' in body) { sets.push('event_format = ?'); vals.push(body.eventFormat ?? null); }
     if (sets.length > 0) {
@@ -529,6 +533,7 @@ events.get('/api/public/events/:slug', async (c) => {
         description: event.description,
         eventType: event.event_type,
         slug: event.slug,
+        recruitmentPaused: !!event.recruitment_paused,
         consultationConfig: config ? serializeConsultationConfig(config) : null,
         bookingForm,
       },
@@ -545,6 +550,10 @@ events.get('/api/public/events/:slug/slots', async (c) => {
     const event = await getEventBySlug(c.env.DB, slug);
     if (!event || !event.is_active || event.event_type !== 'consultation') {
       return c.json({ success: false, error: 'Event not found' }, 404);
+    }
+    // 募集停止中はスロット生成をスキップして空配列＋フラグを返す
+    if (event.recruitment_paused) {
+      return c.json({ success: true, data: { slots: [], recruitmentPaused: true } });
     }
     const config = await getConsultationConfig(c.env.DB, event.id);
     if (!config) return c.json({ success: false, error: 'Config missing' }, 500);
@@ -677,6 +686,9 @@ events.post('/api/public/events/:slug/book', async (c) => {
     const event = await getEventBySlug(c.env.DB, slug);
     if (!event || !event.is_active || event.event_type !== 'consultation') {
       return c.json({ success: false, error: 'Event not found' }, 404);
+    }
+    if (event.recruitment_paused) {
+      return c.json({ success: false, error: '現在募集を停止しています' }, 400);
     }
     const config = await getConsultationConfig(c.env.DB, event.id);
     if (!config) return c.json({ success: false, error: 'Config missing' }, 500);

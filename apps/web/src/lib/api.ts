@@ -437,6 +437,7 @@ export const api = {
         description: string | null
         slug: string
         isActive: boolean
+        recruitmentPaused: boolean
         funnelRole: 'top' | 'mid' | null
         eventFormat: 'seminar' | 'individual' | null
         consultationConfig: Partial<ConsultationConfig>
@@ -1001,6 +1002,7 @@ export interface EventItem {
   eventType: 'consultation' | 'seminar'
   slug: string
   isActive: boolean
+  recruitmentPaused?: boolean
   funnelRole?: 'top' | 'mid' | null
   eventFormat?: 'seminar' | 'individual' | null
   createdAt: string

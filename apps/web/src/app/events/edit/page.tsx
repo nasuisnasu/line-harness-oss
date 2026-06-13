@@ -107,6 +107,7 @@ function Inner() {
         description: event.description,
         slug: event.slug,
         isActive: event.isActive,
+        recruitmentPaused: event.recruitmentPaused ?? false,
         funnelRole: event.funnelRole ?? null,
         eventFormat: event.eventFormat ?? null,
         consultationConfig: config,
@@ -185,9 +186,18 @@ function Inner() {
             </div>
             <p className="text-[11px] text-gray-400 mt-1">LINEのテキストメッセージにそのまま貼り付け可能</p>
           </div>
-          <div className="flex items-center gap-2">
-            <input id="isActive" type="checkbox" checked={event.isActive} onChange={e => setEvent({ ...event, isActive: e.target.checked })} className="w-4 h-4" />
-            <label htmlFor="isActive" className="text-sm text-gray-700">公開する</label>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <input id="isActive" type="checkbox" checked={event.isActive} onChange={e => setEvent({ ...event, isActive: e.target.checked })} className="w-4 h-4" />
+              <label htmlFor="isActive" className="text-sm text-gray-700">公開する</label>
+            </div>
+            <div className="flex items-start gap-2">
+              <input id="recruitmentPaused" type="checkbox" checked={event.recruitmentPaused ?? false} onChange={e => setEvent({ ...event, recruitmentPaused: e.target.checked })} className="w-4 h-4 mt-0.5" />
+              <label htmlFor="recruitmentPaused" className="text-sm text-gray-700">
+                募集停止中（公開のまま予約枠を表示しない）
+                <p className="text-[11px] text-gray-400 mt-0.5">ページは見られるが「予約可能な枠がありません」と表示。月60件キャパ超過時の一時停止用。</p>
+              </label>
+            </div>
           </div>
 
           {/* KPI / ファネル設定 */}
