@@ -331,6 +331,18 @@ interface DailyStatRow { date: string; added: number; blocked: number; cumulativ
 function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
   const [rows, setRows] = useState<DailyStatRow[]>([])
   const [days, setDays] = useState(14)
+  // 画面共有時に売上を見せたくないので、表示はトグル可（localStorage 保存）
+  const [showRevenue, setShowRevenue] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('dashboard.showRevenue') !== '0'
+  })
+  const toggleRevenue = () => {
+    setShowRevenue((v) => {
+      const next = !v
+      try { localStorage.setItem('dashboard.showRevenue', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
   const [events, setEvents] = useState<EventItem[]>([])
   const [eventId, setEventId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -411,6 +423,13 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
             <option value={30}>過去30日</option>
             <option value={60}>過去60日</option>
           </select>
+          <button
+            onClick={toggleRevenue}
+            title={showRevenue ? '売上を隠す（画面共有時など）' : '売上を表示する'}
+            className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white hover:bg-gray-50"
+          >
+            {showRevenue ? '💰 売上 表示中' : '🙈 売上 非表示'}
+          </button>
         </div>
       </div>
 
@@ -425,10 +444,12 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
             <span className="text-xs text-gray-500">期間の申込み</span>
             <span className="text-base font-bold text-blue-600">{totalBookings}</span>
           </div>
-          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-amber-50">
-            <span className="text-xs text-gray-500">期間の売上</span>
-            <span className="text-base font-bold text-amber-700">{formatYen(totalPayment)}</span>
-          </div>
+          {showRevenue && (
+            <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-amber-50">
+              <span className="text-xs text-gray-500">期間の売上</span>
+              <span className="text-base font-bold text-amber-700">{formatYen(totalPayment)}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -444,10 +465,12 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
             <span className="text-xs text-gray-500">累計の申込み</span>
             <span className="text-base font-bold text-gray-700">{lifetime.bookings.toLocaleString()}</span>
           </div>
-          <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
-            <span className="text-xs text-gray-500">累計の売上</span>
-            <span className="text-base font-bold text-gray-700">{formatYen(lifetime.paymentSum)}</span>
-          </div>
+          {showRevenue && (
+            <div className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
+              <span className="text-xs text-gray-500">累計の売上</span>
+              <span className="text-base font-bold text-gray-700">{formatYen(lifetime.paymentSum)}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -460,7 +483,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
               <th className="text-left px-3 py-2 font-semibold">日付</th>
               <th className="text-right px-3 py-2 font-semibold">新規追加</th>
               <th className="text-right px-3 py-2 font-semibold">申込み</th>
-              <th className="text-right px-3 py-2 font-semibold">売上</th>
+              {showRevenue && <th className="text-right px-3 py-2 font-semibold">売上</th>}
               <th className="text-right px-3 py-2 font-semibold">ブロック</th>
               <th className="text-right px-3 py-2 font-semibold">累計（有効）</th>
             </tr>
@@ -472,7 +495,7 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
                   <td className="px-3 py-2"><div className="h-3 bg-gray-100 rounded w-16 animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
-                  <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-12 ml-auto animate-pulse" /></td>
+                  {showRevenue && <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-12 ml-auto animate-pulse" /></td>}
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-8 ml-auto animate-pulse" /></td>
                   <td className="px-3 py-2 text-right"><div className="h-3 bg-gray-100 rounded w-10 ml-auto animate-pulse" /></td>
                 </tr>
@@ -487,9 +510,11 @@ function DailyFriendStats({ lineAccountId }: { lineAccountId: string | null }) {
                   <td className="px-3 py-2 text-right">
                     {r.bookings > 0 ? <span className="text-blue-600 font-semibold">{r.bookings}</span> : <span className="text-gray-300">0</span>}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {(r.paymentSum ?? 0) > 0 ? <span className="text-amber-700 font-semibold">{formatYen(r.paymentSum)}</span> : <span className="text-gray-300">¥0</span>}
-                  </td>
+                  {showRevenue && (
+                    <td className="px-3 py-2 text-right">
+                      {(r.paymentSum ?? 0) > 0 ? <span className="text-amber-700 font-semibold">{formatYen(r.paymentSum)}</span> : <span className="text-gray-300">¥0</span>}
+                    </td>
+                  )}
                   <td className="px-3 py-2 text-right">
                     {r.blocked > 0 ? <span className="text-red-500 font-semibold">-{r.blocked}</span> : <span className="text-gray-300">0</span>}
                   </td>
