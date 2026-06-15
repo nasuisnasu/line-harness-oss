@@ -77,6 +77,8 @@ interface DbConsultationConfig {
   booking_form_fields_json: string;
   booking_form_submit_label: string | null;
   available_until_date: string | null;
+  daily_booking_limit: number | null;
+  monthly_booking_limit: number | null;
 }
 
 type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
@@ -133,6 +135,8 @@ function serializeConsultationConfig(row: DbConsultationConfig) {
     bookingFormFields: JSON.parse(row.booking_form_fields_json || '[]') as unknown[],
     bookingFormSubmitLabel: row.booking_form_submit_label,
     availableUntilDate: row.available_until_date,
+    dailyBookingLimit: row.daily_booking_limit ?? null,
+    monthlyBookingLimit: row.monthly_booking_limit ?? null,
   };
 }
 
@@ -320,6 +324,8 @@ events.put('/api/events/:id', async (c) => {
         bookingFormFields: unknown[];
         bookingFormSubmitLabel: string | null;
         availableUntilDate: string | null;
+        dailyBookingLimit: number | null;
+        monthlyBookingLimit: number | null;
       }>;
     }>();
 
@@ -367,6 +373,8 @@ events.put('/api/events/:id', async (c) => {
       if (cfg.bookingFormFields !== undefined) { cSets.push('booking_form_fields_json = ?'); cVals.push(JSON.stringify(cfg.bookingFormFields)); }
       if ('bookingFormSubmitLabel' in cfg) { cSets.push('booking_form_submit_label = ?'); cVals.push(cfg.bookingFormSubmitLabel ?? null); }
       if ('availableUntilDate' in cfg) { cSets.push('available_until_date = ?'); cVals.push(cfg.availableUntilDate ?? null); }
+      if ('dailyBookingLimit' in cfg) { cSets.push('daily_booking_limit = ?'); cVals.push(cfg.dailyBookingLimit ?? null); }
+      if ('monthlyBookingLimit' in cfg) { cSets.push('monthly_booking_limit = ?'); cVals.push(cfg.monthlyBookingLimit ?? null); }
       if (cSets.length > 0) {
         cSets.push('updated_at = ?');
         cVals.push(jstNow());
@@ -634,6 +642,35 @@ events.get('/api/public/events/:slug/slots', async (c) => {
     const stepMinutes = config.slot_interval_minutes ?? 30;
 
     const availableUntilDate = config.available_until_date;
+
+    // ── 枠制限：daily / monthly の confirmed 件数を事前にカウント ──
+    const dailyLimit = config.daily_booking_limit;
+    const monthlyLimit = config.monthly_booking_limit;
+    const dailyCountMap = new Map<string, number>();
+    const monthlyCountMap = new Map<string, number>();
+    if (dailyLimit || monthlyLimit) {
+      // 月跨ぎ対応で from の月初〜to の月末を取得
+      const monthFromKey = fromStr.slice(0, 7) + '-01';
+      const lastDate = new Date(jstDateAt(toStr, '00:00').getTime() + 31 * 24 * 60 * 60_000);
+      const monthToKey = lastDate.toISOString().slice(0, 10);
+      const rows = await c.env.DB
+        .prepare(
+          `SELECT start_at FROM calendar_bookings
+           WHERE app_event_id = ? AND status = 'confirmed'
+             AND substr(datetime(start_at, '+9 hours'), 1, 10) BETWEEN ? AND ?`,
+        )
+        .bind(event.id, monthFromKey, monthToKey)
+        .all<{ start_at: string }>();
+      for (const r of rows.results ?? []) {
+        const jstDate = new Date(new Date(r.start_at).getTime() + 9 * 60 * 60_000)
+          .toISOString()
+          .slice(0, 10);
+        const yearMonth = jstDate.slice(0, 7);
+        dailyCountMap.set(jstDate, (dailyCountMap.get(jstDate) ?? 0) + 1);
+        monthlyCountMap.set(yearMonth, (monthlyCountMap.get(yearMonth) ?? 0) + 1);
+      }
+    }
+
     for (let cursor = jstDateAt(fromStr, '00:00').getTime(); cursor <= jstDateAt(toStr, '00:00').getTime(); cursor += 24 * 60 * 60_000) {
       const day = new Date(cursor);
       const dateStr = jstDateOnly(day);
@@ -642,6 +679,12 @@ events.get('/api/public/events/:slug/slots', async (c) => {
       const wd = weekdayKey(day);
       const range = businessHours[wd];
       if (!range) continue;
+
+      // この日 / この月の上限到達チェック
+      const yearMonth = dateStr.slice(0, 7);
+      const dailyOver = dailyLimit !== null && dailyLimit !== undefined && (dailyCountMap.get(dateStr) ?? 0) >= dailyLimit;
+      const monthlyOver = monthlyLimit !== null && monthlyLimit !== undefined && (monthlyCountMap.get(yearMonth) ?? 0) >= monthlyLimit;
+
       const dayStart = jstDateAt(dateStr, range[0]).getTime();
       const dayEnd = jstDateAt(dateStr, range[1]).getTime();
 
@@ -649,15 +692,16 @@ events.get('/api/public/events/:slug/slots', async (c) => {
         const start = s;
         const end = s + totalDuration * 60_000;
         if (start > advanceMaxMs) continue;
-        // Two reasons to mark unavailable:
+        // Slot を不可にする理由：
         //   - the slot is before the operator's allowed advance-min cutoff
         //   - the slot collides with a busy interval (GCal or another booking)
+        //   - その日/月の上限に達している
         const tooSoon = start - before * 60_000 < advanceMinMs;
         const conflict = busy.some((b) => intervalsOverlap(start, end, b.start, b.end));
         slots.push({
           start: new Date(start).toISOString(),
           end: new Date(end).toISOString(),
-          available: !tooSoon && !conflict,
+          available: !tooSoon && !conflict && !dailyOver && !monthlyOver,
         });
       }
     }
@@ -719,6 +763,38 @@ events.post('/api/public/events/:slug/book', async (c) => {
       const slotJstDate = new Date(startMs + 9 * 60 * 60_000).toISOString().slice(0, 10);
       if (slotJstDate > config.available_until_date) {
         return c.json({ success: false, error: '予約受付期間を過ぎています' }, 400);
+      }
+    }
+
+    // 枠制限チェック：その日 / その月の confirmed 件数が limit 以上なら拒否
+    if (config.daily_booking_limit || config.monthly_booking_limit) {
+      const slotJstDate = new Date(startMs + 9 * 60 * 60_000).toISOString().slice(0, 10);
+      const yearMonth = slotJstDate.slice(0, 7);
+      if (config.daily_booking_limit) {
+        const dayCountRow = await c.env.DB
+          .prepare(
+            `SELECT COUNT(*) as cnt FROM calendar_bookings
+             WHERE app_event_id = ? AND status = 'confirmed'
+               AND substr(datetime(start_at, '+9 hours'), 1, 10) = ?`,
+          )
+          .bind(event.id, slotJstDate)
+          .first<{ cnt: number }>();
+        if ((dayCountRow?.cnt ?? 0) >= config.daily_booking_limit) {
+          return c.json({ success: false, error: 'この日の予約枠は埋まりました' }, 409);
+        }
+      }
+      if (config.monthly_booking_limit) {
+        const monCountRow = await c.env.DB
+          .prepare(
+            `SELECT COUNT(*) as cnt FROM calendar_bookings
+             WHERE app_event_id = ? AND status = 'confirmed'
+               AND substr(datetime(start_at, '+9 hours'), 1, 7) = ?`,
+          )
+          .bind(event.id, yearMonth)
+          .first<{ cnt: number }>();
+        if ((monCountRow?.cnt ?? 0) >= config.monthly_booking_limit) {
+          return c.json({ success: false, error: '今月の予約枠は埋まりました' }, 409);
+        }
       }
     }
 

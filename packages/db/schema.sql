@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS tags (
   name       TEXT UNIQUE NOT NULL,
   color      TEXT NOT NULL DEFAULT '#3B82F6',
   group_name TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 

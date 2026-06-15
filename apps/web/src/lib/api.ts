@@ -171,6 +171,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ from, to }),
       }),
+    reorder: (orderedIds: string[]) =>
+      fetchApi<ApiResponse<null>>(`/api/tags/reorder`, {
+        method: 'POST',
+        body: JSON.stringify({ orderedIds }),
+      }),
   },
   scenarios: {
     /** Always pass `{ lineAccountId: selectedAccount.id }` — see tags.list. */
@@ -456,7 +461,7 @@ export const api = {
       }),
   },
   kpi: {
-    funnelSummary: (params?: { lineAccountId?: string; days?: number }) =>
+    funnelSummary: (params?: { lineAccountId?: string; days?: number; midTagIds?: string }) =>
       fetchApi<ApiResponse<KpiFunnelSummary>>(
         '/api/kpi/funnel-summary' + (params ? '?' + new URLSearchParams(
           Object.fromEntries(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
@@ -1055,6 +1060,8 @@ export interface ConsultationConfig {
   bookingFormFields: FormFieldItem[]
   bookingFormSubmitLabel?: string | null
   availableUntilDate?: string | null
+  dailyBookingLimit?: number | null
+  monthlyBookingLimit?: number | null
 }
 
 export interface EventBookingItem {

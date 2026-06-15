@@ -272,6 +272,28 @@ function Inner() {
               </div>
               <p className="text-[11px] text-gray-400 mt-1">指定すると、この日付までしか予約枠が表示されません（「最長予約」とAND条件）。空欄なら制限なし。</p>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">1日の予約上限（任意）</label>
+              <input
+                type="number" min={1}
+                value={config.dailyBookingLimit ?? ''}
+                onChange={e => updateConfig({ dailyBookingLimit: e.target.value ? Number(e.target.value) : null })}
+                placeholder="例：2（1日2件まで）"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">空欄なら制限なし。当日に達した時点で残り時間帯は埋まり扱いになります。</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">月間の予約上限（任意）</label>
+              <input
+                type="number" min={1}
+                value={config.monthlyBookingLimit ?? ''}
+                onChange={e => updateConfig({ monthlyBookingLimit: e.target.value ? Number(e.target.value) : null })}
+                placeholder="例：30（月30件まで）"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">空欄なら制限なし。当月の予約数が達した時点で月末まで埋まり扱いになります。</p>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">枠の表示間隔</label>

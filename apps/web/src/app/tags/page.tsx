@@ -25,6 +25,7 @@ export default function TagsPage() {
   const [formError, setFormError] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
+  const [editColor, setEditColor] = useState('#06C755')
   const [editGroup, setEditGroup] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [groupFilter, setGroupFilter] = useState<string>('')
@@ -132,6 +133,7 @@ export default function TagsPage() {
   const handleEdit = (tag: Tag) => {
     setEditingId(tag.id)
     setEditName(tag.name)
+    setEditColor(tag.color)
     setEditGroup(tag.groupName ?? '')
   }
 
@@ -139,7 +141,7 @@ export default function TagsPage() {
     if (!editName.trim()) return
     setEditSaving(true)
     try {
-      await api.tags.update(id, { name: editName.trim(), groupName: editGroup.trim() || null })
+      await api.tags.update(id, { name: editName.trim(), color: editColor, groupName: editGroup.trim() || null })
       setEditingId(null)
       loadTags()
     } finally {
@@ -153,6 +155,27 @@ export default function TagsPage() {
       loadTags()
     } catch {
       setError('グループの更新に失敗しました')
+    }
+  }
+
+  // 同じグループ内で1つ前/後ろへ移動。グローバルな並び順(sort_order)を
+  // 入れ替えてサーバーに反映する（楽観的更新）。
+  const handleMove = async (tag: Tag, dir: -1 | 1) => {
+    const sameGroup = tags.filter(t => (t.groupName ?? null) === (tag.groupName ?? null))
+    const idx = sameGroup.findIndex(t => t.id === tag.id)
+    const target = idx + dir
+    if (target < 0 || target >= sameGroup.length) return
+    const other = sameGroup[target]
+    const next = [...tags]
+    const ia = next.findIndex(t => t.id === tag.id)
+    const ib = next.findIndex(t => t.id === other.id)
+    ;[next[ia], next[ib]] = [next[ib], next[ia]]
+    setTags(next)
+    try {
+      await api.tags.reorder(next.map(t => t.id))
+    } catch {
+      setError('並び替えに失敗しました')
+      loadTags()
     }
   }
 
@@ -359,7 +382,7 @@ export default function TagsPage() {
                     {groupName} <span className="text-gray-400 font-normal ml-1">({items.length})</span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {items.map((tag) => (
+                    {items.map((tag, idx) => (
                       <div
                         key={tag.id}
                         className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col gap-2 group"
@@ -367,7 +390,7 @@ export default function TagsPage() {
                         <div className="flex items-center gap-2">
                           <span
                             className="w-3 h-3 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: tag.color }}
+                            style={{ backgroundColor: editingId === tag.id ? editColor : tag.color }}
                           />
                           {editingId === tag.id ? (
                             <input
@@ -384,6 +407,17 @@ export default function TagsPage() {
                         </div>
                         {editingId === tag.id ? (
                           <>
+                            <div className="flex flex-wrap gap-1.5">
+                              {TAG_COLORS.map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setEditColor(c)}
+                                  className="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110"
+                                  style={{ backgroundColor: c, borderColor: editColor === c ? '#111' : 'transparent' }}
+                                />
+                              ))}
+                            </div>
                             <GroupPicker
                               value={editGroup}
                               onChange={setEditGroup}
@@ -409,6 +443,18 @@ export default function TagsPage() {
                               <p className="text-[10px] text-gray-400 truncate">{tag.groupName}</p>
                             )}
                             <div className="flex gap-2 mt-1">
+                              <button
+                                onClick={() => handleMove(tag, -1)}
+                                disabled={idx === 0}
+                                title="前へ"
+                                className="text-xs text-gray-400 hover:text-gray-700 disabled:opacity-20 disabled:cursor-default"
+                              >←</button>
+                              <button
+                                onClick={() => handleMove(tag, 1)}
+                                disabled={idx === items.length - 1}
+                                title="後ろへ"
+                                className="text-xs text-gray-400 hover:text-gray-700 disabled:opacity-20 disabled:cursor-default"
+                              >→</button>
                               <a href={`/friends?tagId=${tag.id}`} className="text-xs text-blue-600 hover:underline">友だち一覧</a>
                               <select
                                 value={tag.groupName ?? ''}

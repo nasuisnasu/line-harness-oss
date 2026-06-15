@@ -558,6 +558,40 @@ liffRoutes.post('/api/liff/link', async (c) => {
           .run();
       }
 
+      // LINE プロフィール（表示名・アイコン）を取得して埋める。LIFF経由の追加は
+      // フォロー webhook を待たずにここを通るため、これが無いと名前・画像が
+      // null のまま「不明」表示になる。アカウントの bot トークンで getProfile。
+      if (lineAccountId) {
+        const acct = await getLineAccountById(db, lineAccountId);
+        if (acct?.channel_access_token) {
+          try {
+            const profileClient = new LineClient(acct.channel_access_token);
+            const profile = await profileClient.getProfile(lineUserId);
+            if (profile) {
+              await db
+                .prepare(
+                  `UPDATE friends
+                     SET display_name = COALESCE(?, display_name),
+                         picture_url = COALESCE(?, picture_url),
+                         status_message = COALESCE(?, status_message),
+                         updated_at = ?
+                   WHERE id = ?`,
+                )
+                .bind(
+                  profile.displayName ?? null,
+                  profile.pictureUrl ?? null,
+                  profile.statusMessage ?? null,
+                  jstNow(),
+                  friend.id,
+                )
+                .run();
+            }
+          } catch (err) {
+            console.warn('[LIFF link] getProfile failed:', err);
+          }
+        }
+      }
+
       // Auto-enroll in the entry-route's scenario, regardless of whether the
       // user was already a friend. Previously this lived inside the
       // `alreadyFriend` branch below, which meant new friends arriving via

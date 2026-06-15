@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { api, type KpiFunnelSummary } from '@/lib/api'
+import type { Tag } from '@line-crm/shared'
 import Header from '@/components/layout/header'
 import { useAccount } from '@/lib/account-context'
+
+const midTagStorageKey = (accountId: string | undefined) => `lh_kpi_mid_tag_${accountId ?? 'all'}`
 
 export default function KpiPage() {
   const { selectedAccount } = useAccount()
@@ -11,13 +14,39 @@ export default function KpiPage() {
   const [data, setData] = useState<KpiFunnelSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [tags, setTags] = useState<Tag[]>([])
+  // 個別説明会(mid)としてカウントするタグID。アカウントごとに localStorage 保存。
+  const [midTagId, setMidTagId] = useState('')
+
+  // アカウント切り替え時にタグ一覧と保存済みの選択を読み込む
+  useEffect(() => {
+    let cancelled = false
+    const params = selectedAccount ? { lineAccountId: selectedAccount.id } : undefined
+    api.tags.list(params).then((res) => {
+      if (!cancelled && res.success) setTags(res.data)
+    }).catch(() => { /* ignore */ })
+    try {
+      const saved = localStorage.getItem(midTagStorageKey(selectedAccount?.id)) ?? ''
+      setMidTagId(saved)
+    } catch { setMidTagId('') }
+    return () => { cancelled = true }
+  }, [selectedAccount])
+
+  const handleMidTagChange = (id: string) => {
+    setMidTagId(id)
+    try { localStorage.setItem(midTagStorageKey(selectedAccount?.id), id) } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError('')
     api.kpi
-      .funnelSummary({ ...(selectedAccount ? { lineAccountId: selectedAccount.id } : {}), days })
+      .funnelSummary({
+        ...(selectedAccount ? { lineAccountId: selectedAccount.id } : {}),
+        days,
+        ...(midTagId ? { midTagIds: midTagId } : {}),
+      })
       .then((res) => {
         if (cancelled) return
         if (res.success) setData(res.data)
@@ -26,7 +55,7 @@ export default function KpiPage() {
       .catch(() => { if (!cancelled) setError('KPIデータの取得に失敗しました') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [selectedAccount, days])
+  }, [selectedAccount, days, midTagId])
 
   const pct = (num: number, denom: number) => {
     if (denom <= 0) return '—'
@@ -39,7 +68,23 @@ export default function KpiPage() {
       <Header title="KPI / ファネル分析" description="流入 → top → 個別説明会 → 成約 の各段階を可視化" />
       <main className="px-6 py-6">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-end mb-4 flex-wrap gap-2">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex gap-2 items-center">
+              <label className="text-xs text-gray-500">個別説明会タグ</label>
+              <select
+                value={midTagId}
+                onChange={(e) => handleMidTagChange(e.target.value)}
+                className="text-xs border border-gray-300 rounded-md px-2 py-1 bg-white max-w-[220px]"
+                title="このタグが付いた友だちを「個別説明会」としてカウントします"
+              >
+                <option value="">（未選択）</option>
+                {tags.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.groupName ? `${t.groupName} / ${t.name}` : t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex gap-2 items-center">
               <select
                 value={days}
@@ -54,6 +99,12 @@ export default function KpiPage() {
               </select>
             </div>
           </div>
+
+          {!midTagId && (
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800 mb-3">
+              「個別説明会」は指定タグの付与数でカウントします。上の<strong>個別説明会タグ</strong>を選んでください（例: 「個別説明会 申込済み」）。未選択の間は 0 件で表示されます。
+            </div>
+          )}
 
           {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
           {loading && <p className="text-xs text-gray-500">読み込み中…</p>}

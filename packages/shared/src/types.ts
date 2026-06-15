@@ -46,6 +46,8 @@ export interface Tag {
   color: string;
   /** グループ名（用途別の任意の分類ラベル）。NULL = 未分類 */
   groupName?: string | null;
+  /** 表示の並び順（昇順）。小さいほど先頭。 */
+  sortOrder?: number;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }

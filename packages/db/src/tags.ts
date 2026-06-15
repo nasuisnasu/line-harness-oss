@@ -5,6 +5,7 @@ export interface Tag {
   name: string;
   color: string;
   group_name: string | null;
+  sort_order: number;
   created_at: string;
 }
 
@@ -17,15 +18,24 @@ export interface FriendTag {
 export async function getTags(db: D1Database, lineAccountId?: string): Promise<Tag[]> {
   if (lineAccountId) {
     const result = await db
-      .prepare(`SELECT * FROM tags WHERE line_account_id = ? ORDER BY name ASC`)
+      .prepare(`SELECT * FROM tags WHERE line_account_id = ? ORDER BY sort_order ASC, name ASC`)
       .bind(lineAccountId)
       .all<Tag>();
     return result.results;
   }
   const result = await db
-    .prepare(`SELECT * FROM tags ORDER BY name ASC`)
+    .prepare(`SELECT * FROM tags ORDER BY sort_order ASC, name ASC`)
     .all<Tag>();
   return result.results;
+}
+
+/** 渡された順に sort_order を 0,1,2... で振り直す。並び替え用。 */
+export async function reorderTags(db: D1Database, orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  const stmts = orderedIds.map((id, i) =>
+    db.prepare(`UPDATE tags SET sort_order = ? WHERE id = ?`).bind(i, id),
+  );
+  await db.batch(stmts);
 }
 
 export interface CreateTagInput {
@@ -42,13 +52,18 @@ export async function createTag(
   const id = crypto.randomUUID();
   const now = jstNow();
   const color = input.color ?? '#3B82F6';
+  // 末尾に追加されるよう、現在の最大 sort_order + 1 を採番。
+  const maxRow = await db
+    .prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM tags`)
+    .first<{ m: number }>();
+  const sortOrder = (maxRow?.m ?? -1) + 1;
 
   await db
     .prepare(
-      `INSERT INTO tags (id, line_account_id, name, color, group_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tags (id, line_account_id, name, color, group_name, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, input.lineAccountId ?? null, input.name, color, input.groupName ?? null, now)
+    .bind(id, input.lineAccountId ?? null, input.name, color, input.groupName ?? null, sortOrder, now)
     .run();
 
   return (await db

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getTags, createTag, deleteTag, updateTag } from '@line-crm/db';
+import { getTags, createTag, deleteTag, updateTag, reorderTags } from '@line-crm/db';
 import type { Tag as DbTag } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -11,6 +11,7 @@ function serializeTag(row: DbTag) {
     name: row.name,
     color: row.color,
     groupName: row.group_name,
+    sortOrder: row.sort_order,
     createdAt: row.created_at,
   };
 }
@@ -47,6 +48,22 @@ tags.post('/api/tags', async (c) => {
     return c.json({ success: true, data: serializeTag(tag) }, 201);
   } catch (err) {
     console.error('POST /api/tags error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/tags/reorder — 並び替え。orderedIds の順に sort_order を振り直す。
+// 注意: /:id ルートより前に登録すること（後だと "reorder" が id として食われる）。
+tags.post('/api/tags/reorder', async (c) => {
+  try {
+    const body = await c.req.json<{ orderedIds: string[] }>();
+    if (!Array.isArray(body.orderedIds)) {
+      return c.json({ success: false, error: 'orderedIds (array) is required' }, 400);
+    }
+    await reorderTags(c.env.DB, body.orderedIds);
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    console.error('POST /api/tags/reorder error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
