@@ -62,6 +62,7 @@ export default function BroadcastsPage() {
   const [editingBroadcast, setEditingBroadcast] = useState<ApiBroadcast | null>(null)
   const [audiences, setAudiences] = useState<Record<string, AudiencePreview>>({})
   const [expandedAudienceId, setExpandedAudienceId] = useState<string | null>(null)
+  const [expandedContentId, setExpandedContentId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const { selectedAccount } = useAccount()
 
@@ -111,6 +112,10 @@ export default function BroadcastsPage() {
       const res = await api.broadcasts.audience(broadcastId)
       if (res.success) setAudiences((m) => ({ ...m, [broadcastId]: res.data }))
     }
+  }
+
+  const toggleContent = (broadcastId: string) => {
+    setExpandedContentId((cur) => (cur === broadcastId ? null : broadcastId))
   }
 
   // Group broadcasts by groupName ("(未分類)" for empty group).
@@ -264,6 +269,12 @@ export default function BroadcastsPage() {
                                 </td>
                                 <td className="px-4 py-3 text-right">
                                   <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => toggleContent(broadcast.id)}
+                                      className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors"
+                                    >
+                                      {expandedContentId === broadcast.id ? '内容を閉じる' : '内容を見る'}
+                                    </button>
                                     {showAudienceButton && (
                                       <button
                                         onClick={() => { setEditingBroadcast(broadcast); setShowCreate(false) }}
@@ -314,6 +325,13 @@ export default function BroadcastsPage() {
                                   </td>
                                 </tr>
                               )}
+                              {expandedContentId === broadcast.id && (
+                                <tr key={`${broadcast.id}-content`} className="bg-gray-50/60">
+                                  <td colSpan={7} className="px-4 py-3">
+                                    <BroadcastContentView broadcast={broadcast} />
+                                  </td>
+                                </tr>
+                              )}
                             </>
                           )
                         })}
@@ -328,6 +346,46 @@ export default function BroadcastsPage() {
       )}
 
       <CcPromptButton prompts={ccPrompts} />
+    </div>
+  )
+}
+
+function labelForType(type: string): string {
+  return type === 'text' ? 'テキスト' : type === 'image' ? '画像' : type === 'buttons' ? 'ボタン' : type === 'flex' ? 'Flex' : type
+}
+
+function MessageBody({ type, content }: { type: string; content: string }) {
+  if (type === 'image') {
+    return (
+      <div className="space-y-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={content} alt="" className="max-w-[240px] rounded border border-gray-200" />
+        <p className="text-[11px] text-gray-400 break-all">{content}</p>
+      </div>
+    )
+  }
+  if (type === 'text') {
+    return <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{content}</p>
+  }
+  let pretty = content
+  try { pretty = JSON.stringify(JSON.parse(content), null, 2) } catch { /* keep raw */ }
+  return <pre className="text-xs text-gray-700 whitespace-pre-wrap break-words bg-gray-50 rounded p-2 overflow-x-auto">{pretty}</pre>
+}
+
+function BroadcastContentView({ broadcast }: { broadcast: ApiBroadcast }) {
+  const msgs = broadcast.messages && broadcast.messages.length > 0
+    ? broadcast.messages
+    : [{ type: broadcast.messageType, content: broadcast.messageContent }]
+  return (
+    <div className="space-y-3">
+      {msgs.map((m, i) => (
+        <div key={i} className="bg-white rounded-lg border border-gray-200 p-3">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+            {msgs.length > 1 ? `メッセージ${i + 1}・` : ''}{labelForType(m.type)}
+          </p>
+          <MessageBody type={m.type} content={m.content} />
+        </div>
+      ))}
     </div>
   )
 }
