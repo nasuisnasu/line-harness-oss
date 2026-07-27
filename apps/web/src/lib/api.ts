@@ -61,6 +61,7 @@ export type FriendListParams = {
   limit?: string
   tagId?: string
   lineAccountId?: string
+  search?: string
 }
 
 export type FriendWithTags = Friend & { tags: Tag[]; activeScenarios: { id: string; name: string }[] }
@@ -148,6 +149,22 @@ export const api = {
           method: 'DELETE',
         }),
     },
+    lessons: {
+      list: (friendId: string) =>
+        fetchApi<ApiResponse<{
+          records: { id: string; type: 'contract' | 'lesson' | 'cancel'; count: number; recordDate: string; note: string | null; createdAt: string }[];
+          summary: { contracted: number; conducted: number; cancelled: number; consumed: number; remaining: number };
+        }>>(`/api/friends/${friendId}/lessons`),
+      add: (friendId: string, data: { type: 'contract' | 'lesson' | 'cancel'; count?: number; recordDate?: string; note?: string }) =>
+        fetchApi<ApiResponse<{ id: string }>>(`/api/friends/${friendId}/lessons`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      delete: (friendId: string, recordId: string) =>
+        fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/lessons/${recordId}`, {
+          method: 'DELETE',
+        }),
+    },
   },
   tags: {
     /** Always pass `{ lineAccountId: selectedAccount.id }` from `useAccount()`.
@@ -176,6 +193,17 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ orderedIds }),
       }),
+  },
+  businessCalendar: {
+    get: (lineAccountId: string) =>
+      fetchApi<ApiResponse<BusinessCalendar>>(
+        '/api/business-calendar?lineAccountId=' + lineAccountId
+      ),
+    update: (lineAccountId: string, data: { closedWeekdays?: number[]; closedDates?: string[]; notice?: string | null }) =>
+      fetchApi<ApiResponse<BusinessCalendar>>(
+        '/api/business-calendar?lineAccountId=' + lineAccountId,
+        { method: 'PUT', body: JSON.stringify(data) }
+      ),
   },
   scenarios: {
     /** Always pass `{ lineAccountId: selectedAccount.id }` — see tags.list. */
@@ -454,7 +482,7 @@ export const api = {
       ),
     delete: (id: string) => fetchApi<ApiResponse<null>>(`/api/events/${id}`, { method: 'DELETE' }),
     bookings: (id: string) =>
-      fetchApi<ApiResponse<EventBookingItem[]>>(`/api/events/${id}/bookings`),
+      fetchApi<ApiResponse<EventBookingItem[]> & { applicationFields?: FormFieldItem[] }>(`/api/events/${id}/bookings`),
     cancelBooking: (bookingId: string) =>
       fetchApi<ApiResponse<{ id: string; status: string }>>(`/api/event-bookings/${bookingId}/cancel`, {
         method: 'POST',
@@ -828,6 +856,8 @@ export const api = {
       }),
     unlinkFromFriend: (friendId: string) =>
       fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/rich-menu`, { method: 'DELETE' }),
+    getFriendCurrent: (friendId: string) =>
+      fetchApi<ApiResponse<{ name: string | null; source: 'individual' | 'default' }>>(`/api/friends/${friendId}/rich-menu`),
     imageUrl: (id: string) => {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
       const apiKey = (typeof window !== 'undefined' ? localStorage.getItem('apiKey') : null) ?? process.env.NEXT_PUBLIC_API_KEY ?? ''
@@ -887,7 +917,7 @@ export const api = {
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/forms/${id}`, { method: 'DELETE' }),
     submissions: (id: string) =>
-      fetchApi<ApiResponse<FormSubmissionItem[]>>(`/api/forms/${id}/submissions`),
+      fetchApi<ApiResponse<FormSubmissionItem[]> & { winnerTagId?: string | null }>(`/api/forms/${id}/submissions`),
   },
   trackedLinks: {
     list: (params?: { lineAccountId?: string }) =>
@@ -952,6 +982,7 @@ export interface FormSubmissionItem {
   friendName?: string | null
   data: Record<string, unknown>
   createdAt: string
+  isWinner?: boolean
 }
 
 export interface RichMenuAreaItem {
@@ -1014,6 +1045,14 @@ export interface EventItem {
   updatedAt: string
 }
 
+export interface BusinessCalendar {
+  lineAccountId: string
+  closedWeekdays: number[]
+  closedDates: string[]
+  notice: string | null
+  updatedAt: string
+}
+
 export interface KpiFunnelSummary {
   period: { from: string; to: string; days: number }
   overall: {
@@ -1062,6 +1101,7 @@ export interface ConsultationConfig {
   availableUntilDate?: string | null
   dailyBookingLimit?: number | null
   monthlyBookingLimit?: number | null
+  requiresPaymentTicket?: boolean
 }
 
 export interface EventBookingItem {
@@ -1076,6 +1116,7 @@ export interface EventBookingItem {
   endAt: string
   status: 'confirmed' | 'cancelled' | 'completed'
   metadata: Record<string, unknown> | null
+  applicationData: Record<string, unknown> | null
   createdAt: string
 }
 

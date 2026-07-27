@@ -201,6 +201,9 @@ export default function RichMenusPage() {
                     ) : (
                       <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-500">未公開</span>
                     )}
+                    {item.isDefault && (
+                      <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-semibold">表示中（デフォルト）</span>
+                    )}
                     {item.showOnFriendAdd && (
                       <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-700">友達追加時に自動表示</span>
                     )}

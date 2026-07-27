@@ -14,6 +14,27 @@ import { calculateStaggerDelay, sleep, addMessageVariation, addJitter } from './
 import { applyTrackingLinks, hasTrackingLinks } from './step-delivery.js';
 
 const MULTICAST_BATCH_SIZE = 500;
+// messages_log を1人1回 .run() すると、配信人数ぶんのサブリクエストが発生し
+// Cloudflare の上限（1リクエスト1000回）で処理が途中終了する。db.batch() で
+// まとめて1コールに集約し、上限に当たらないようにする。
+const LOG_BATCH_SIZE = 100;
+
+/**
+ * 送信ログ（messages_log）を db.batch() でまとめて INSERT する。
+ * 100件ずつのチャンクにして、1チャンク=1サブリクエストに抑える。
+ */
+async function flushMessageLogs(
+  db: D1Database,
+  stmts: D1PreparedStatement[],
+): Promise<void> {
+  for (let k = 0; k < stmts.length; k += LOG_BATCH_SIZE) {
+    try {
+      await db.batch(stmts.slice(k, k + LOG_BATCH_SIZE));
+    } catch (err) {
+      console.error('messages_log batch insert failed:', err);
+    }
+  }
+}
 
 export async function processBroadcastSend(
   db: D1Database,
@@ -106,6 +127,10 @@ export async function processBroadcastSend(
       totalCount = friends.length;
 
       const now = jstNow();
+      const logStmts: D1PreparedStatement[] = [];
+      const logSql =
+        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+         VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`;
       if (needsPerFriend) {
         // 1人ずつ個別push（トラッキングリンクのため）
         for (let i = 0; i < friends.length; i++) {
@@ -121,20 +146,17 @@ export async function processBroadcastSend(
             // Log a single summary row regardless of how many messages were
             // sent — the multi-message body is too long to dump verbatim
             // and the broadcast_id already lets you join back to the source.
-            const logId = crypto.randomUUID();
+            // 実INSERTは最後に db.batch() でまとめて流す（サブリクエスト節約）。
             const logType = multiMessages ? 'multi' : broadcast.message_type;
             const logContent = multiMessages ? `[${multiMessages.length} messages]` : applyTrackingLinks(broadcast.message_content, trackingBaseUrl ?? '', friend.id);
-            await db
-              .prepare(
-                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                 VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
-              )
-              .bind(logId, friend.id, logType, logContent, broadcastId, now)
-              .run();
+            logStmts.push(
+              db.prepare(logSql).bind(crypto.randomUUID(), friend.id, logType, logContent, broadcastId, now),
+            );
           } catch (err) {
             console.error(`Push to ${friend.line_user_id} failed:`, err);
           }
         }
+        await flushMessageLogs(db, logStmts);
       } else {
         // multicast（バッチ送信）
         const baseMessages: Message[] = multiMessages
@@ -164,22 +186,19 @@ export async function processBroadcastSend(
             await client.multicast(lineUserIds, batchMessages);
             successCount += batch.length;
 
+            const logType = multiMessages ? 'multi' : broadcast.message_type;
+            const logContent = multiMessages ? `[${multiMessages.length} messages]` : broadcast.message_content;
             for (const friend of batch) {
-              const logId = crypto.randomUUID();
-              const logType = multiMessages ? 'multi' : broadcast.message_type;
-              const logContent = multiMessages ? `[${multiMessages.length} messages]` : broadcast.message_content;
-              await db
-                .prepare(
-                  `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                   VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
-                )
-                .bind(logId, friend.id, logType, logContent, broadcastId, now)
-                .run();
+              // 実INSERTは最後に db.batch() でまとめて流す（サブリクエスト節約）。
+              logStmts.push(
+                db.prepare(logSql).bind(crypto.randomUUID(), friend.id, logType, logContent, broadcastId, now),
+              );
             }
           } catch (err) {
             console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
           }
         }
+        await flushMessageLogs(db, logStmts);
       }
     }
 

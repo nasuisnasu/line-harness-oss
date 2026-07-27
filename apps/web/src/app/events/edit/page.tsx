@@ -244,13 +244,13 @@ function Inner() {
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">後ろのインターバル（分）</label>
               <select value={config.bufferAfterMinutes} onChange={e => updateConfig({ bufferAfterMinutes: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
-                {[0, 5, 10, 15, 30].map(m => <option key={m} value={m}>{m}分</option>)}
+                {[0, 5, 10, 15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m}分</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">前のインターバル（分）</label>
               <select value={config.bufferBeforeMinutes} onChange={e => updateConfig({ bufferBeforeMinutes: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
-                {[0, 5, 10, 15, 30].map(m => <option key={m} value={m}>{m}分</option>)}
+                {[0, 5, 10, 15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m}分</option>)}
               </select>
             </div>
             <div />
@@ -293,6 +293,22 @@ function Inner() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
               <p className="text-[11px] text-gray-400 mt-1">空欄なら制限なし。当月の予約数が達した時点で月末まで埋まり扱いになります。</p>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={config.requiresPaymentTicket ?? false}
+                  onChange={e => updateConfig({ requiresPaymentTicket: e.target.checked })}
+                  className="w-4 h-4 mt-0.5"
+                />
+                <span className="text-sm text-gray-700">
+                  事前決済を必須にする（有料イベント）
+                  <span className="block text-[11px] text-gray-400 mt-0.5">
+                    ONにすると、決済で発行された未使用の予約券（?ticket=）が無い予約を拒否します。無料イベントはOFFのまま。
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
           <div>

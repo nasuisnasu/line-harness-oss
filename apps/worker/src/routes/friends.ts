@@ -3,6 +3,7 @@ import {
   getFriends,
   getFriendById,
   getFriendCount,
+  countFriends,
   addTagToFriend,
   removeTagFromFriend,
   getFriendTags,
@@ -52,31 +53,16 @@ friends.get('/api/friends', async (c) => {
     const offset = Number(c.req.query('offset') ?? '0');
     const tagId = c.req.query('tagId');
     const lineAccountIdParam = c.req.query('lineAccountId');
+    const search = c.req.query('search') ?? undefined; // 表示名の部分一致検索
     // undefined = no filter, string = filter by account
     const lineAccountId: string | undefined = lineAccountIdParam;
 
     const db = c.env.DB;
 
-    // When filtering by tag, count only friends with that tag for accurate pagination
-    const totalPromise = tagId
-      ? db
-          .prepare(
-            lineAccountId !== undefined
-              ? `SELECT COUNT(*) as count FROM friends f
-                 INNER JOIN friend_tags ft ON ft.friend_id = f.id
-                 WHERE ft.tag_id = ? AND f.line_account_id = ?`
-              : `SELECT COUNT(*) as count FROM friends f
-                 INNER JOIN friend_tags ft ON ft.friend_id = f.id
-                 WHERE ft.tag_id = ?`,
-          )
-          .bind(...(lineAccountId !== undefined ? [tagId, lineAccountId] : [tagId]))
-          .first<{ count: number }>()
-          .then((row) => row?.count ?? 0)
-      : getFriendCount(db, lineAccountId);
-
+    // タグ・アカウント・検索の絞り込みに一致する件数（ページネーション用）
     const [items, total] = await Promise.all([
-      getFriends(db, { limit, offset, tagId, lineAccountId }),
-      totalPromise,
+      getFriends(db, { limit, offset, tagId, lineAccountId, search }),
+      countFriends(db, { tagId, lineAccountId, search }),
     ]);
 
     // Fetch tags and active scenarios for each friend in parallel
@@ -515,6 +501,80 @@ friends.delete('/api/friends/:id/payments/:paymentId', async (c) => {
     return c.json({ success: true, data: null });
   } catch (err) {
     console.error('DELETE /api/friends/:id/payments/:paymentId error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// GET /api/friends/:id/lessons - 授業記録（履歴＋集計）
+friends.get('/api/friends/:id/lessons', async (c) => {
+  try {
+    const friendId = c.req.param('id');
+    const result = await c.env.DB
+      .prepare(
+        `SELECT id, type, count, record_date as recordDate, note, created_at as createdAt
+         FROM friend_lesson_records
+         WHERE friend_id = ?
+         ORDER BY record_date DESC, created_at DESC`,
+      )
+      .bind(friendId)
+      .all<{ id: string; type: string; count: number; recordDate: string; note: string | null; createdAt: string }>();
+    const records = result.results ?? [];
+    let contracted = 0, conducted = 0, cancelled = 0;
+    for (const r of records) {
+      if (r.type === 'contract') contracted += r.count ?? 0;
+      else if (r.type === 'lesson') conducted += 1;
+      else if (r.type === 'cancel') cancelled += 1;
+    }
+    const consumed = conducted + cancelled;
+    return c.json({
+      success: true,
+      data: { records, summary: { contracted, conducted, cancelled, consumed, remaining: contracted - consumed } },
+    });
+  } catch (err) {
+    console.error('GET /api/friends/:id/lessons error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/friends/:id/lessons - 記録を追加（contract / lesson / cancel）
+friends.post('/api/friends/:id/lessons', async (c) => {
+  try {
+    const friendId = c.req.param('id');
+    const body = await c.req.json<{ type: string; count?: number; recordDate?: string; note?: string }>();
+    if (!body.type || !['contract', 'lesson', 'cancel'].includes(body.type)) {
+      return c.json({ success: false, error: 'type must be contract | lesson | cancel' }, 400);
+    }
+    // contract のみ count を採用。lesson / cancel は常に 1 消化。
+    const count = body.type === 'contract' ? Math.max(1, Math.round(body.count ?? 1)) : 1;
+    const recordDate = body.recordDate || jstNow().slice(0, 10);
+    const id = crypto.randomUUID();
+    const now = jstNow();
+    await c.env.DB
+      .prepare(
+        `INSERT INTO friend_lesson_records (id, friend_id, type, count, record_date, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, friendId, body.type, count, recordDate, body.note ?? null, now, now)
+      .run();
+    return c.json({ success: true, data: { id } });
+  } catch (err) {
+    console.error('POST /api/friends/:id/lessons error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// DELETE /api/friends/:id/lessons/:recordId - 記録を削除
+friends.delete('/api/friends/:id/lessons/:recordId', async (c) => {
+  try {
+    const friendId = c.req.param('id');
+    const recordId = c.req.param('recordId');
+    await c.env.DB
+      .prepare('DELETE FROM friend_lesson_records WHERE id = ? AND friend_id = ?')
+      .bind(recordId, friendId)
+      .run();
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    console.error('DELETE /api/friends/:id/lessons/:recordId error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

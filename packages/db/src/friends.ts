@@ -18,69 +18,67 @@ export interface GetFriendsOptions {
   offset?: number;
   tagId?: string;
   lineAccountId?: string | null;
+  /** 表示名の部分一致検索（display_name LIKE %search%） */
+  search?: string;
+}
+
+/** getFriends / countFriends 共通の WHERE 句とバインド値を組み立てる */
+function buildFriendFilter(opts: {
+  tagId?: string;
+  lineAccountId?: string | null;
+  search?: string;
+}): { join: string; where: string; binds: unknown[] } {
+  const { tagId, lineAccountId, search } = opts;
+  const join = tagId ? 'INNER JOIN friend_tags ft ON ft.friend_id = f.id' : '';
+  const conds: string[] = [];
+  const binds: unknown[] = [];
+  if (tagId) {
+    conds.push('ft.tag_id = ?');
+    binds.push(tagId);
+  }
+  if (lineAccountId !== undefined) {
+    if (lineAccountId === null) conds.push('f.line_account_id IS NULL');
+    else {
+      conds.push('f.line_account_id = ?');
+      binds.push(lineAccountId);
+    }
+  }
+  const s = (search ?? '').trim();
+  if (s) {
+    conds.push('f.display_name LIKE ?');
+    binds.push('%' + s + '%');
+  }
+  return { join, where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', binds };
 }
 
 export async function getFriends(
   db: D1Database,
   opts: GetFriendsOptions = {},
 ): Promise<Friend[]> {
-  const { limit = 50, offset = 0, tagId, lineAccountId } = opts;
-
-  if (tagId) {
-    const accountFilter = lineAccountId !== undefined
-      ? lineAccountId === null ? 'AND f.line_account_id IS NULL' : 'AND f.line_account_id = ?'
-      : '';
-    const binds: unknown[] = lineAccountId !== undefined && lineAccountId !== null
-      ? [tagId, lineAccountId, limit, offset]
-      : [tagId, limit, offset];
-    const result = await db
-      .prepare(
-        `SELECT f.*
-         FROM friends f
-         INNER JOIN friend_tags ft ON ft.friend_id = f.id
-         WHERE ft.tag_id = ? ${accountFilter}
-         ORDER BY f.created_at DESC
-         LIMIT ? OFFSET ?`,
-      )
-      .bind(...binds)
-      .all<Friend>();
-    return result.results;
-  }
-
-  if (lineAccountId !== undefined) {
-    if (lineAccountId === null) {
-      const result = await db
-        .prepare(
-          `SELECT * FROM friends
-           WHERE line_account_id IS NULL
-           ORDER BY created_at DESC
-           LIMIT ? OFFSET ?`,
-        )
-        .bind(limit, offset)
-        .all<Friend>();
-      return result.results;
-    }
-    const result = await db
-      .prepare(
-        `SELECT * FROM friends
-         WHERE line_account_id = ?
-         ORDER BY created_at DESC
-         LIMIT ? OFFSET ?`,
-      )
-      .bind(lineAccountId, limit, offset)
-      .all<Friend>();
-    return result.results;
-  }
-
+  const { limit = 50, offset = 0, tagId, lineAccountId, search } = opts;
+  const { join, where, binds } = buildFriendFilter({ tagId, lineAccountId, search });
   const result = await db
     .prepare(
-      `SELECT * FROM friends
-       ORDER BY created_at DESC
+      `SELECT f.* FROM friends f ${join} ${where}
+       ORDER BY f.created_at DESC
        LIMIT ? OFFSET ?`,
     )
-    .bind(limit, offset)
+    .bind(...binds, limit, offset)
     .all<Friend>();
   return result.results;
+}
+
+/** 絞り込み条件（タグ・アカウント・名前検索）に一致する友だち数。ページネーション用。 */
+export async function countFriends(
+  db: D1Database,
+  opts: { tagId?: string; lineAccountId?: string | null; search?: string } = {},
+): Promise<number> {
+  const { join, where, binds } = buildFriendFilter(opts);
+  const row = await db
+    .prepare(`SELECT COUNT(*) as count FROM friends f ${join} ${where}`)
+    .bind(...binds)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 export async function getFriendByLineUserId(

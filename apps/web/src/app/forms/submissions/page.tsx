@@ -16,6 +16,8 @@ function Inner() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<ViewMode>('cards')
   const [query, setQuery] = useState('')
+  const [winnerTagId, setWinnerTagId] = useState<string | null>(null)
+  const [saving, setSaving] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -24,9 +26,23 @@ function Inner() {
       api.forms.submissions(id),
     ]).then(([fRes, sRes]) => {
       if (fRes.success) setForm(fRes.data)
-      if (sRes.success) setSubmissions(sRes.data)
+      if (sRes.success) { setSubmissions(sRes.data); setWinnerTagId((sRes as { winnerTagId?: string | null }).winnerTagId ?? null) }
     }).finally(() => setLoading(false))
   }, [id])
+
+  // 当選チェック → 当選タグを付け外し（＝その人だけ予約カレンダーが開く）
+  const toggleWinner = async (sub: FormSubmissionItem) => {
+    if (!winnerTagId || !sub.friendId || saving) return
+    const next = !sub.isWinner
+    setSaving(sub.id)
+    const res = next
+      ? await api.friends.addTag(sub.friendId, winnerTagId)
+      : await api.friends.removeTag(sub.friendId, winnerTagId)
+    if (res.success) {
+      setSubmissions((prev) => prev.map((x) => x.friendId === sub.friendId ? { ...x, isWinner: next } : x))
+    }
+    setSaving(null)
+  }
 
   const filtered = useMemo(() => {
     if (!query.trim()) return submissions
@@ -130,11 +146,20 @@ function Inner() {
                     )}
                   </div>
                 </div>
-                <div className="text-xs text-gray-500">
-                  {new Date(sub.createdAt).toLocaleString('ja-JP', {
-                    year: 'numeric', month: '2-digit', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit',
-                  })}
+                <div className="flex items-center gap-3">
+                  {winnerTagId && sub.friendId && (
+                    <label className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none ${sub.isWinner ? 'text-green-600' : 'text-gray-400'}`} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={!!sub.isWinner} disabled={saving === sub.id} onChange={() => toggleWinner(sub)}
+                        className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500" />
+                      当選
+                    </label>
+                  )}
+                  <div className="text-xs text-gray-500">
+                    {new Date(sub.createdAt).toLocaleString('ja-JP', {
+                      year: 'numeric', month: '2-digit', day: '2-digit',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </div>
                 </div>
               </div>
               {/* Card body — Q&A pairs */}
@@ -172,6 +197,7 @@ function Inner() {
             <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  {winnerTagId && <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">当選</th>}
                   <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">回答日時</th>
                   <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">友達</th>
                   {form.fields.map(f => (
@@ -181,7 +207,15 @@ function Inner() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map(sub => (
-                  <tr key={sub.id} className="hover:bg-gray-50 align-top">
+                  <tr key={sub.id} className={`hover:bg-gray-50 align-top ${sub.isWinner ? 'bg-green-50/50' : ''}`}>
+                    {winnerTagId && (
+                      <td className="px-3 py-2">
+                        {sub.friendId && (
+                          <input type="checkbox" checked={!!sub.isWinner} disabled={saving === sub.id} onChange={() => toggleWinner(sub)}
+                            className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer" />
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
                       {new Date(sub.createdAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     </td>

@@ -49,6 +49,8 @@ interface FormState {
   profile: { userId: string; displayName: string; pictureUrl?: string } | null;
   friendId: string | null;
   submitting: boolean;
+  /** This friend's previous answers, used to prefill a repeat submission. */
+  prefill: Record<string, unknown> | null;
 }
 
 const state: FormState = {
@@ -56,6 +58,7 @@ const state: FormState = {
   profile: null,
   friendId: null,
   submitting: false,
+  prefill: null,
 };
 
 function escapeHtml(str: string): string {
@@ -80,10 +83,15 @@ function getApp(): HTMLElement {
 
 // ========== Field Rendering ==========
 
-function renderField(field: FormField): string {
+function renderField(field: FormField, prefill?: Record<string, unknown>): string {
   const required = field.required ? ' required' : '';
   const placeholder = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : '';
   const requiredMark = field.required ? '<span class="required-mark">*</span>' : '';
+
+  // Previous answer for this field, if the respondent has submitted before.
+  const prev = prefill?.[field.name];
+  const prevText = typeof prev === 'string' || typeof prev === 'number' ? String(prev) : '';
+  const prevList = Array.isArray(prev) ? prev.map((v) => String(v)) : [];
 
   let inputHtml = '';
 
@@ -94,12 +102,15 @@ function renderField(field: FormField): string {
         id="field-${escapeHtml(field.name)}"
         class="form-textarea"
         rows="4"
-        ${placeholder}${required}></textarea>`;
+        ${placeholder}${required}>${escapeHtml(prevText)}</textarea>`;
       break;
 
     case 'select': {
       const opts = (field.options ?? [])
-        .map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`)
+        .map(
+          (o) =>
+            `<option value="${escapeHtml(o)}"${o === prevText ? ' selected' : ''}>${escapeHtml(o)}</option>`,
+        )
         .join('');
       inputHtml = `<select
         name="${escapeHtml(field.name)}"
@@ -116,7 +127,7 @@ function renderField(field: FormField): string {
         .map(
           (o) =>
             `<label class="radio-label">
-              <input type="radio" name="${escapeHtml(field.name)}" value="${escapeHtml(o)}"${required} />
+              <input type="radio" name="${escapeHtml(field.name)}" value="${escapeHtml(o)}"${o === prevText ? ' checked' : ''}${required} />
               ${escapeHtml(o)}
             </label>`,
         )
@@ -130,7 +141,7 @@ function renderField(field: FormField): string {
         .map(
           (o) =>
             `<label class="checkbox-label">
-              <input type="checkbox" name="${escapeHtml(field.name)}" value="${escapeHtml(o)}" />
+              <input type="checkbox" name="${escapeHtml(field.name)}" value="${escapeHtml(o)}"${prevList.includes(o) ? ' checked' : ''} />
               ${escapeHtml(o)}
             </label>`,
         )
@@ -145,6 +156,7 @@ function renderField(field: FormField): string {
         name="${escapeHtml(field.name)}"
         id="field-${escapeHtml(field.name)}"
         class="form-input"
+        value="${escapeHtml(prevText)}"
         ${placeholder}${required} />`;
       break;
   }
@@ -186,7 +198,9 @@ function injectStyles(): void {
     .form-input:focus, .form-textarea:focus, .form-select:focus {
       outline: none; border-color: #06C755; background: #fff;
     }
-    .form-textarea { resize: vertical; min-height: 80px; }
+    /* Height is driven by autoGrow(), so hide the scrollbar and the drag handle.
+       min-height sets the empty/initial size; the box grows from there. */
+    .form-textarea { resize: none; overflow: hidden; min-height: 120px; line-height: 1.6; }
     .form-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
     .radio-group, .checkbox-group { display: flex; flex-direction: column; gap: 10px; }
     .radio-label, .checkbox-label {
@@ -206,6 +220,17 @@ function injectStyles(): void {
     .submit-btn:active { opacity: 0.85; }
     .submit-btn:disabled { background: #bbb; cursor: not-allowed; }
     .form-error { color: #e53e3e; font-size: 12px; margin-top: 4px; }
+    .form-blocked {
+      background: #fafafa; border: 1px solid #e6e6e6; border-radius: 10px;
+      padding: 20px 18px; margin-top: 8px;
+      font-size: 14px; line-height: 1.9; color: #555; white-space: pre-wrap;
+    }
+    .form-blocked p { margin: 0; }
+    .form-prefill-note {
+      background: #f0f9f4; border: 1px solid #cce9d9; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 18px;
+      font-size: 12.5px; line-height: 1.6; color: #1d6b4a;
+    }
     .form-success { text-align: center; padding: 40px 20px; }
     .form-success .check { width: 64px; height: 64px; border-radius: 50%; background: #06C755; color: #fff; font-size: 32px; line-height: 64px; margin: 0 auto 16px; }
     .form-success h2 { font-size: 20px; color: #06C755; margin-bottom: 12px; }
@@ -229,7 +254,14 @@ function render(): void {
       </div>`
     : '';
 
-  const fieldsHtml = formDef.fields.map(renderField).join('');
+  // Pass prefill explicitly — .map() would otherwise hand renderField the index.
+  const fieldsHtml = formDef.fields
+    .map((f) => renderField(f, state.prefill ?? undefined))
+    .join('');
+
+  const prefillNotice = state.prefill
+    ? '<div class="form-prefill-note">前回ご入力いただいた内容を引き継いでいます。変わったところだけ直してください。</div>'
+    : '';
 
   app.innerHTML = `
     <div class="form-page">
@@ -239,6 +271,7 @@ function render(): void {
         ${profileHtml}
       </div>
       <form id="liff-form" class="form-body" novalidate>
+        ${prefillNotice}
         ${fieldsHtml}
         <button type="submit" class="submit-btn" id="submitBtn">${escapeHtml(formDef.submitLabel?.trim() || '送信する')}</button>
       </form>
@@ -302,6 +335,18 @@ function renderFormError(message: string): void {
       <div class="card">
         <h2 style="color: #e53e3e;">エラー</h2>
         <p class="error">${escapeHtml(message)}</p>
+      </div>
+    </div>
+  `;
+}
+
+/** 応募資格が無い人への案内。エラーではないので赤くしない。 */
+function renderBlocked(message: string): void {
+  const app = getApp();
+  app.innerHTML = `
+    <div class="form-page">
+      <div class="form-blocked">
+        <p>${escapeHtml(message)}</p>
       </div>
     </div>
   `;
@@ -444,11 +489,28 @@ async function submitForm(): Promise<void> {
   }
 }
 
+/** Grow a textarea to fit its content so long answers stay fully visible. */
+function autoGrow(el: HTMLTextAreaElement): void {
+  el.style.height = 'auto';
+  // box-sizing is border-box, so `height` must include the borders that
+  // scrollHeight leaves out — otherwise the last line gets clipped.
+  const borders = el.offsetHeight - el.clientHeight;
+  el.style.height = `${el.scrollHeight + borders}px`;
+}
+
 function attachFormEvents(): void {
   const form = document.getElementById('liff-form');
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     void submitForm();
+  });
+
+  // Auto-resize textareas: size to content on load (prefilled answers can be
+  // long) and on every keystroke.
+  const textareas = document.querySelectorAll<HTMLTextAreaElement>('.form-textarea');
+  textareas.forEach((el) => {
+    autoGrow(el);
+    el.addEventListener('input', () => autoGrow(el));
   });
 }
 
@@ -521,7 +583,45 @@ export async function initForm(formId: string | null): Promise<void> {
       return;
     }
 
+    // 予約履歴ゲート：すでに参加済みの人にはフォームを出さない
+    try {
+      const q = new URLSearchParams();
+      if (profile.userId) q.set('lineUserId', profile.userId);
+      if (state.friendId) q.set('friendId', state.friendId);
+      const elig = await apiCall(`/api/forms/${formId}/eligibility?${q.toString()}`);
+      if (elig.ok) {
+        const ej = await elig.json() as { success: boolean; data?: { eligible: boolean; message: string | null } };
+        if (ej.success && ej.data && !ej.data.eligible) {
+          renderBlocked(ej.data.message ?? 'すでにご参加いただいているため、応募できません。');
+          return;
+        }
+      }
+    } catch {
+      // silent — 判定に失敗したらフォームは出す（送信時にサーバ側で弾かれる）
+    }
+
     state.formDef = json.data;
+
+    // Prefill from this friend's last submission so repeat respondents only edit
+    // what changed. Best-effort: any failure just renders an empty form.
+    try {
+      const q = new URLSearchParams();
+      if (profile.userId) q.set('lineUserId', profile.userId);
+      if (state.friendId) q.set('friendId', state.friendId);
+      const lastRes = await apiCall(`/api/forms/${formId}/last?${q.toString()}`);
+      if (lastRes.ok) {
+        const lastJson = await lastRes.json() as {
+          success: boolean;
+          data?: { data?: Record<string, unknown> } | null;
+        };
+        if (lastJson.success && lastJson.data?.data) {
+          state.prefill = lastJson.data.data;
+        }
+      }
+    } catch {
+      // silent — prefill is a convenience, not a requirement
+    }
+
     render();
   } catch (err) {
     renderFormError(err instanceof Error ? err.message : 'エラーが発生しました');

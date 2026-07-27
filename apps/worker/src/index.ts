@@ -39,6 +39,8 @@ import { actions } from './routes/actions.js';
 import { autoReplies } from './routes/auto-replies.js';
 import { events as eventsRoute } from './routes/events.js';
 import { kpi } from './routes/kpi.js';
+import { businessCalendar } from './routes/business-calendar.js';
+import { pay } from './routes/pay.js';
 
 export type Env = {
   Bindings: {
@@ -54,6 +56,8 @@ export type Env = {
     DISCORD_WEBHOOK_URL?: string;
     TRACKING_BASE_URL?: string;
     GOOGLE_SA_JSON?: string;
+    UNIVAPAY_WEBHOOK_SECRET?: string;
+    PAY_DISCORD_WEBHOOK_URL?: string;  // 課金通知の専用Discord（未設定ならDISCORD_WEBHOOK_URLにフォールバック）
   };
 };
 
@@ -98,6 +102,8 @@ app.route('/', actions);
 app.route('/', autoReplies);
 app.route('/', eventsRoute);
 app.route('/', kpi);
+app.route('/', businessCalendar);
+app.route('/', pay);
 
 // 404 fallback
 app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));

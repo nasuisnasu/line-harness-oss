@@ -13,7 +13,7 @@ import {
 import { getFriendByLineUserId, getFriendById } from '@line-crm/db';
 import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { Form as DbForm, FormSubmission as DbFormSubmission, FormType } from '@line-crm/db';
-import { notifyScenarioEnrolled } from '../services/discord-notify.js';
+import { notifyFormSubmitted, notifyScenarioEnrolled } from '../services/discord-notify.js';
 import { processStepDeliveries } from '../services/step-delivery.js';
 import { LineClient } from '@line-crm/line-sdk';
 import type { Env } from '../index.js';
@@ -75,6 +75,49 @@ forms.get('/api/forms', async (c) => {
   }
 });
 
+
+/**
+ * フォームに設定された「このイベントを予約済みなら応募させない」ゲート。
+ * 戦略会議の無料枠は一人1回までなので、すでに参加した人を弾く用途。
+ * キャンセル済みは「参加した」に数えない（実際には会えていないため）。
+ */
+async function isBlockedByBooking(
+  db: D1Database,
+  form: { block_if_booked_slugs?: string | null },
+  friendId: string | null,
+): Promise<boolean> {
+  const raw = form.block_if_booked_slugs?.trim();
+  if (!raw || !friendId) return false;
+  const slugs = raw.split(',').map((x) => x.trim()).filter(Boolean);
+  if (slugs.length === 0) return false;
+  const ph = slugs.map(() => '?').join(',');
+  const row = await db
+    .prepare(
+      `SELECT 1 AS hit FROM calendar_bookings b
+       JOIN events e ON e.id = b.app_event_id
+       WHERE b.friend_id = ? AND e.slug IN (${ph}) AND b.status IN ('confirmed','completed')
+       LIMIT 1`,
+    )
+    .bind(friendId, ...slugs)
+    .first<{ hit: number }>();
+  return Boolean(row);
+}
+
+/** friendId / lineUserId のどちらからでも友だちを引き当てる（submit と同じフォールバック） */
+async function resolveFriendId(
+  db: D1Database,
+  friendId: string | null | undefined,
+  lineUserId: string | null | undefined,
+): Promise<string | null> {
+  let id = friendId ?? null;
+  if (id && !(await getFriendById(db, id))) id = null;
+  if (!id && lineUserId) {
+    const f = await getFriendByLineUserId(db, lineUserId);
+    id = f?.id ?? null;
+  }
+  return id;
+}
+
 // GET /api/forms/:id — get form (public, used by LIFF)
 // Strips correct_answers so the answer key never reaches the client.
 forms.get('/api/forms/:id', async (c) => {
@@ -87,6 +130,67 @@ forms.get('/api/forms/:id', async (c) => {
     return c.json({ success: true, data: serializeForm(form) });
   } catch (err) {
     console.error('GET /api/forms/:id error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// GET /api/forms/:id/last — this friend's most recent submission (public, used by LIFF)
+// Lets a repeat respondent start from what they answered last time instead of
+// retyping everything. Returns { data: null } when there is nothing to prefill.
+forms.get('/api/forms/:id/last', async (c) => {
+  try {
+    const formId = c.req.param('id');
+    const lineUserId = c.req.query('lineUserId');
+    const rawFriendId = c.req.query('friendId');
+
+    // Same stale-fallback chain as submit: trust the LIFF-cached UUID only if it
+    // still resolves, otherwise look the friend up by their LINE user id.
+    let friendId: string | null = rawFriendId ?? null;
+    if (friendId && !(await getFriendById(c.env.DB, friendId))) {
+      friendId = null;
+    }
+    if (!friendId && lineUserId) {
+      const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
+      friendId = friend?.id ?? null;
+    }
+    if (!friendId) {
+      return c.json({ success: true, data: null });
+    }
+
+    const row = await c.env.DB
+      .prepare(
+        `SELECT data, created_at FROM form_submissions
+         WHERE form_id = ? AND friend_id = ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(formId, friendId)
+      .first<{ data: string; created_at: string }>();
+    if (!row) {
+      return c.json({ success: true, data: null });
+    }
+
+    return c.json({
+      success: true,
+      data: { data: JSON.parse(row.data || '{}'), submittedAt: row.created_at },
+    });
+  } catch (err) {
+    console.error('GET /api/forms/:id/last error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// GET /api/forms/:id/eligibility — この友だちが応募できるか（public, used by LIFF）
+forms.get('/api/forms/:id/eligibility', async (c) => {
+  try {
+    const formId = c.req.param('id');
+    const form = await getFormById(c.env.DB, formId);
+    if (!form) return c.json({ success: false, error: 'Form not found' }, 404);
+    const friendId = await resolveFriendId(c.env.DB, c.req.query('friendId'), c.req.query('lineUserId'));
+    const blocked = await isBlockedByBooking(c.env.DB, form as never, friendId);
+    const msg = (form as unknown as { block_message?: string | null }).block_message ?? null;
+    return c.json({ success: true, data: { eligible: !blocked, message: blocked ? msg : null } });
+  } catch (err) {
+    console.error('GET /api/forms/:id/eligibility error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
@@ -255,11 +359,32 @@ forms.get('/api/forms/:id/submissions', async (c) => {
       }
     }
 
+    // このフォームが「どのイベントの応募窓口か」を辿り、当選タグ（requires_tag_id）を得る。
+    // 応募一覧でその場でチェック→当選タグ付与できるようにする。
+    let winnerTagId: string | null = null;
+    const cfg = await c.env.DB
+      .prepare(`SELECT requires_tag_id FROM event_consultation_configs WHERE application_form_id = ? LIMIT 1`)
+      .bind(id)
+      .first<{ requires_tag_id: string | null }>();
+    winnerTagId = cfg?.requires_tag_id ?? null;
+
+    // 各応募者が当選タグを持っているか
+    const wonSet = new Set<string>();
+    if (winnerTagId && friendIds.length > 0) {
+      const ph = friendIds.map(() => '?').join(',');
+      const rows = await c.env.DB
+        .prepare(`SELECT friend_id FROM friend_tags WHERE tag_id = ? AND friend_id IN (${ph})`)
+        .bind(winnerTagId, ...friendIds)
+        .all<{ friend_id: string }>();
+      for (const r of rows.results) wonSet.add(r.friend_id);
+    }
+
     const data = submissions.map((s) => ({
       ...serializeSubmission(s),
       friendName: s.friend_id ? (friendNameMap.get(s.friend_id) ?? null) : null,
+      isWinner: s.friend_id ? wonSet.has(s.friend_id) : false,
     }));
-    return c.json({ success: true, data });
+    return c.json({ success: true, data, winnerTagId });
   } catch (err) {
     console.error('GET /api/forms/:id/submissions error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
@@ -324,6 +449,13 @@ forms.post('/api/forms/:id/submit', async (c) => {
       }
     }
 
+    // 予約履歴ゲート：すでに対象イベントに参加済みなら応募させない
+    if (await isBlockedByBooking(c.env.DB, form as never, friendId)) {
+      const msg = (form as unknown as { block_message?: string | null }).block_message
+        ?? 'すでにご参加いただいているため、応募できません。';
+      return c.json({ success: false, error: msg }, 403);
+    }
+
     // 1人1回まで制限：既に同じ友達からの提出があれば「既に回答済み」を返す
     if (form.submit_once && friendId) {
       const existing = await c.env.DB
@@ -352,6 +484,19 @@ forms.post('/api/forms/:id/submit', async (c) => {
       maxScore: grade?.maxScore ?? null,
       passed: grade?.passed ?? null,
     });
+
+    // Discord notification — same channel as event bookings. Non-blocking.
+    c.executionCtx.waitUntil(
+      (async () => {
+        const friend = friendId ? await getFriendById(c.env.DB, friendId) : null;
+        await notifyFormSubmitted(c.env.DISCORD_WEBHOOK_URL, {
+          formName: form.display_name?.trim() || form.name,
+          friendName: friend?.display_name ?? body.lineUserId ?? '(不明)',
+          fields: JSON.parse(form.fields || '[]'),
+          data: submissionData,
+        });
+      })().catch((err) => console.error('[forms.submit] discord notify failed:', err)),
+    );
 
     // Side effects (best-effort, don't fail the request)
     if (friendId) {

@@ -38,9 +38,17 @@ export default function FriendsPage() {
   const [page, setPage] = useState(1)
   const [hasNextPage, setHasNextPage] = useState(false)
   const [selectedTagId, setSelectedTagId] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const { selectedAccount } = useAccount()
+
+  // 名前検索は入力から300msでデバウンス
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
   const loadTags = useCallback(async () => {
     try {
@@ -62,6 +70,7 @@ export default function FriendsPage() {
       }
       if (selectedTagId) params.tagId = selectedTagId
       if (selectedAccount) params.lineAccountId = selectedAccount.id
+      if (search) params.search = search
 
       const res = await api.friends.list(params)
       if (res.success) {
@@ -76,7 +85,7 @@ export default function FriendsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, selectedTagId, selectedAccount])
+  }, [page, selectedTagId, selectedAccount, search])
 
   useEffect(() => {
     loadTags()
@@ -84,7 +93,7 @@ export default function FriendsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [selectedTagId, selectedAccount])
+  }, [selectedTagId, selectedAccount, search])
 
   useEffect(() => {
     loadFriends()
@@ -100,6 +109,15 @@ export default function FriendsPage() {
 
       {/* Filters */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 mb-4">
+        <div className="flex items-center gap-2 flex-1 sm:flex-none">
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="名前で検索"
+            className="text-sm border border-gray-300 rounded-lg px-3 py-2 min-h-[44px] bg-white focus:outline-none focus:ring-2 focus:ring-green-500 flex-1 sm:w-56"
+          />
+        </div>
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-600 font-medium whitespace-nowrap">タグで絞り込み:</label>
           <select

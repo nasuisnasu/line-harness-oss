@@ -1,0 +1,40 @@
+{
+  "id": "daily-report",
+  "name": "英弱ニキ_日報フォーム",
+  "displayName": "今日の日報",
+  "description": "今日もお疲れさま！今日の学習を振り返って提出してください。",
+  "submitLabel": "提出する",
+  "formType": "daily_report",
+  "isActive": true,
+  "passingScore": null,
+  "fields": [
+    {
+      "name": "study_minutes",
+      "label": "今日の学習時間（分）",
+      "type": "number",
+      "required": true,
+      "placeholder": "例: 90"
+    },
+    {
+      "name": "what_did",
+      "label": "今日やったこと",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "例: 単語帳150〜200番、長文1題（30分）"
+    },
+    {
+      "name": "understanding",
+      "label": "理解度",
+      "type": "radio",
+      "required": true,
+      "options": ["バッチリ", "まあまあ", "イマイチ", "全然わからん"]
+    },
+    {
+      "name": "tomorrow",
+      "label": "明日やること（自分との約束）",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "例: 単語帳の復習＋同じ長文の音読5回"
+    }
+  ]
+}

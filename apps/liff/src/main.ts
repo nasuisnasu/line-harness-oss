@@ -19,6 +19,7 @@ import { initForm } from './form.js';
 import { initEventBooking } from './event-booking.js';
 import { initSendTemplate } from './send-template.js';
 import { initEijaku } from './eijaku.js';
+import { initSchedule } from './schedule.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -59,8 +60,12 @@ function apiCall(path: string, options?: RequestInit): Promise<Response> {
 function getPage(): string | null {
   const path = window.location.pathname.replace(/^\/+/, '');
   if (path === 'book') return 'book';
-  const params = new URLSearchParams(window.location.search);
-  return params.get('page');
+  // window.location.search だけだと、LIFFログイン経由で page が liff.state に
+  // 押し込まれた場合に拾えず、既定の友だち追加フローへ落ちる。ref と同様に
+  // liff.state / hash も見る _snapshotParam で解決する。
+  const direct = new URLSearchParams(window.location.search).get('page');
+  if (direct) return direct;
+  return _snapshotParam('page');
 }
 
 // Snapshot the URL params synchronously at module load. liff.init() can
@@ -308,7 +313,13 @@ async function linkAndAddFlow() {
         linkPromise,
         new Promise((r) => setTimeout(r, 500)),
       ]);
-      window.location.href = redirectUrl;
+      let dest = redirectUrl;
+      // passUid=1 のときだけ、リダイレクト先に LINE userId を付与する。
+      // （決済ページで userId を掴んで webhook から本人にリンクを送るため）
+      if (_snapshotParam('passUid') === '1' && profile?.userId) {
+        dest += (dest.includes('?') ? '&' : '?') + 'uid=' + encodeURIComponent(profile.userId);
+      }
+      window.location.href = dest;
       return;
     }
 
@@ -383,7 +394,8 @@ async function main() {
     } else if (page === 'event') {
       const params = new URLSearchParams(window.location.search);
       const slug = params.get('slug');
-      await initEventBooking(slug);
+      const ticket = params.get('ticket') ?? _snapshotParam('ticket');
+      await initEventBooking(slug, ticket);
     } else if (page === 'form') {
       const params = new URLSearchParams(window.location.search);
       const formId = params.get('id');
@@ -396,6 +408,9 @@ async function main() {
       const params = new URLSearchParams(window.location.search);
       const formId = params.get('id');
       await initEijaku(formId);
+    } else if (page === 'schedule') {
+      const lineAccountId = _snapshotParam('lineAccountId');
+      await initSchedule(lineAccountId);
     } else {
       await linkAndAddFlow();
     }

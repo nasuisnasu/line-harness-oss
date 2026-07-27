@@ -18,6 +18,7 @@ import {
   addTagToFriend,
   removeTagFromFriend,
   enrollFriendInScenario,
+  getRichMenuById,
   jstNow,
 } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
@@ -239,8 +240,11 @@ async function executeAction(
         .bind(friendId)
         .first<{ line_user_id: string }>();
       if (!friend) break;
+      // richMenuId は harness 内部のUUID。LINE API 用に line_richmenu_id へ解決する。
+      const menu = await getRichMenuById(db, action.params.richMenuId);
+      if (!menu || !menu.line_richmenu_id) break;
       const lineClient = new LineClient(lineAccessToken);
-      await lineClient.linkRichMenuToUser(friend.line_user_id, action.params.richMenuId);
+      await lineClient.linkRichMenuToUser(friend.line_user_id, menu.line_richmenu_id);
       break;
     }
 

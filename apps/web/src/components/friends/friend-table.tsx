@@ -36,6 +36,17 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
   const [scenarioHistories, setScenarioHistories] = useState<Record<string, ScenarioHistory[]>>({})
   const [richMenus, setRichMenus] = useState<RichMenuItem[]>([])
   const [richMenuMessage, setRichMenuMessage] = useState('')
+  const [currentRichMenu, setCurrentRichMenu] = useState<Record<string, { name: string | null; source: 'individual' | 'default' } | 'loading'>>({})
+
+  const loadCurrentRichMenu = async (id: string) => {
+    setCurrentRichMenu(prev => ({ ...prev, [id]: 'loading' }))
+    try {
+      const res = await api.richMenus.getFriendCurrent(id)
+      setCurrentRichMenu(prev => ({ ...prev, [id]: res.success ? res.data : { name: null, source: 'default' } }))
+    } catch {
+      setCurrentRichMenu(prev => ({ ...prev, [id]: { name: null, source: 'default' } }))
+    }
+  }
   const router = useRouter()
 
   useEffect(() => {
@@ -47,7 +58,7 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
     setRichMenuMessage('')
     try {
       const res = await api.richMenus.assignToFriend(friendId, richMenuRecordId)
-      if (res.success) setRichMenuMessage('✓ リッチメニューを割り当てました')
+      if (res.success) { setRichMenuMessage('✓ リッチメニューを割り当てました'); void loadCurrentRichMenu(friendId) }
       else setError(res.error)
     } catch {
       setError('リッチメニューの割当に失敗しました')
@@ -62,7 +73,7 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
     setRichMenuMessage('')
     try {
       const res = await api.richMenus.unlinkFromFriend(friendId)
-      if (res.success) setRichMenuMessage('✓ リッチメニューを解除しました')
+      if (res.success) { setRichMenuMessage('✓ リッチメニューを解除しました'); void loadCurrentRichMenu(friendId) }
       else setError(res.error)
     } catch {
       setError('解除に失敗しました')
@@ -77,11 +88,14 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
     setAddingTagForFriend(null)
     setSelectedTagId('')
     setError('')
-    if (next && !scenarioHistories[id]) {
-      try {
-        const res = await api.friends.scenarios(id)
-        if (res.success) setScenarioHistories(prev => ({ ...prev, [id]: res.data }))
-      } catch { /* ignore */ }
+    if (next) {
+      if (richMenus.length > 0) void loadCurrentRichMenu(id)
+      if (!scenarioHistories[id]) {
+        try {
+          const res = await api.friends.scenarios(id)
+          if (res.success) setScenarioHistories(prev => ({ ...prev, [id]: res.data }))
+        } catch { /* ignore */ }
+      }
     }
   }
 
@@ -378,6 +392,14 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
                         {richMenus.length > 0 && (
                           <div className="pt-1 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
                             <p className="text-xs font-semibold text-gray-500 mb-1">リッチメニュー割当</p>
+                            <p className="text-xs text-gray-600 mb-2">
+                              現在：{(() => {
+                                const cur = currentRichMenu[friend.id]
+                                if (cur === undefined || cur === 'loading') return <span className="text-gray-400">確認中…</span>
+                                if (!cur.name) return <span className="text-gray-400">未設定</span>
+                                return <><b className="text-gray-800">{cur.name}</b><span className="text-gray-400">{cur.source === 'default' ? '（デフォルト）' : '（個別割当）'}</span></>
+                              })()}
+                            </p>
                             <div className="flex items-center gap-2">
                               <select
                                 className="text-xs border border-gray-300 rounded px-2 py-1 bg-white"

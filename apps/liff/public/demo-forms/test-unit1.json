@@ -1,0 +1,54 @@
+{
+  "id": "test-unit1",
+  "name": "英弱ニキ_Unit1_確認テスト",
+  "displayName": "Unit1 確認テスト（時制）",
+  "description": "Unit1 で扱った時制の確認テストです。全5問・5分くらいで終わります。",
+  "submitLabel": "採点する",
+  "formType": "test",
+  "isActive": true,
+  "passingScore": 80,
+  "fields": [
+    {
+      "name": "q1",
+      "label": "She ___ coffee every morning.",
+      "type": "radio",
+      "required": true,
+      "options": ["drink", "drinks", "drank", "is drinking"]
+    },
+    {
+      "name": "q2",
+      "label": "I ___ my homework when you called.",
+      "type": "radio",
+      "required": true,
+      "options": ["did", "was doing", "have done", "do"]
+    },
+    {
+      "name": "q3",
+      "label": "He ___ in Tokyo since 2020.",
+      "type": "radio",
+      "required": true,
+      "options": ["lives", "lived", "has lived", "is living"]
+    },
+    {
+      "name": "q4",
+      "label": "現在完了で「経験」を表す副詞を全部選びなさい",
+      "type": "checkbox",
+      "required": true,
+      "options": ["ever", "yet", "already", "never", "since"]
+    },
+    {
+      "name": "q5",
+      "label": "「過去形」を英語で言うと？",
+      "type": "text",
+      "required": true,
+      "placeholder": "英単語1語で"
+    }
+  ],
+  "correctAnswers": {
+    "q1": "drinks",
+    "q2": "was doing",
+    "q3": "has lived",
+    "q4": ["ever", "never"],
+    "q5": ["past tense", "past", "preterite"]
+  }
+}

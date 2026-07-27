@@ -140,6 +140,12 @@ richMenus.put('/api/rich-menus/:id', async (c) => {
         const account = await getLineAccountById(c.env.DB, updated.line_account_id);
         if (account) {
           const client = new LineClient(account.channel_access_token);
+          // Check LINE for the live default binding before deleting — the default
+          // may have been set outside this tool, in which case is_default is 0
+          // here and the binding would be lost without this.
+          const liveDefaultId = await client.getDefaultRichMenuId();
+          const wasDefault =
+            Boolean(existing.is_default) || liveDefaultId === existing.line_richmenu_id;
           // Pull the existing image off LINE so the operator doesn't have to
           // re-upload just to change tap regions.
           const { data, contentType } = await client.downloadRichMenuImage(existing.line_richmenu_id);
@@ -152,8 +158,12 @@ richMenus.put('/api/rich-menus/:id', async (c) => {
           await client.uploadRichMenuImage(richMenuId, data, ct);
           await updateRichMenuRecord(c.env.DB, id, { lineRichmenuId: richMenuId });
           // Restore default-menu binding if this entry was the active default.
-          if (existing.is_default) {
-            try { await client.setDefaultRichMenu(richMenuId); } catch (e) { console.error('republish: set-default failed:', e); }
+          if (wasDefault) {
+            try {
+              await client.setDefaultRichMenu(richMenuId);
+              await updateRichMenuRecord(c.env.DB, id, { isDefault: true });
+              await clearOtherDefaults(c.env.DB, updated.line_account_id, id);
+            } catch (e) { console.error('republish: set-default failed:', e); }
           }
         }
       } catch (err) {
@@ -220,6 +230,15 @@ richMenus.post('/api/rich-menus/:id/publish', async (c) => {
 
     const client = new LineClient(account.channel_access_token);
 
+    // Re-publishing means delete + create, which mints a NEW richMenuId and drops
+    // LINE's default binding — the menu silently vanishes for every user. Check
+    // LINE for the live binding (not just is_default: the default may have been
+    // set outside this tool) so it can be restored onto the new menu below.
+    const liveDefaultId = await client.getDefaultRichMenuId();
+    const wasDefault =
+      Boolean(item.is_default) ||
+      (item.line_richmenu_id != null && liveDefaultId === item.line_richmenu_id);
+
     if (item.line_richmenu_id) {
       try { await client.deleteRichMenu(item.line_richmenu_id); } catch (e) { console.error('Pre-delete failed:', e); }
     }
@@ -229,6 +248,16 @@ richMenus.post('/api/rich-menus/:id/publish', async (c) => {
     const { richMenuId } = await client.createRichMenu(lineMenu as never);
     await client.uploadRichMenuImage(richMenuId, imageData, contentType);
     await updateRichMenuRecord(c.env.DB, id, { lineRichmenuId: richMenuId });
+
+    if (wasDefault) {
+      try {
+        await client.setDefaultRichMenu(richMenuId);
+        await updateRichMenuRecord(c.env.DB, id, { isDefault: true });
+        await clearOtherDefaults(c.env.DB, item.line_account_id, id);
+      } catch (e) {
+        console.error('republish: restore default failed:', e);
+      }
+    }
 
     const updated = await getRichMenuById(c.env.DB, id);
     return c.json({ success: true, data: updated ? serialize(updated) : null });
@@ -300,6 +329,48 @@ richMenus.get('/api/rich-menus/:id/image', async (c) => {
 });
 
 // ─── Friend ↔ rich menu manual link/unlink ──────────────────────────────
+// 今その友達に表示されているリッチメニュー名を返す（展開時に1人分だけ問い合わせ）。
+// 個別リンクがあればその名前、無ければ（LINEが404）アカウントのデフォルトメニュー名。
+richMenus.get('/api/friends/:friendId/rich-menu', async (c) => {
+  try {
+    const friendId = c.req.param('friendId');
+    const friend = await getFriendById(c.env.DB, friendId);
+    if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+    const accountId = friend.line_account_id;
+    if (!accountId) return c.json({ success: false, error: 'Friend has no line_account_id' }, 400);
+    const account = await getLineAccountById(c.env.DB, accountId);
+    if (!account) return c.json({ success: false, error: 'LINE account not found' }, 404);
+    const client = new LineClient(account.channel_access_token);
+
+    let lineRichmenuId: string | null = null;
+    let source: 'individual' | 'default' = 'individual';
+    try {
+      const r = await client.getRichMenuIdOfUser(friend.line_user_id);
+      lineRichmenuId = r.richMenuId;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('404')) throw e; // 本物のエラーは上へ
+      // 404 = 個別リンクなし → アカウントのデフォルトメニューを見る
+      source = 'default';
+      const def = await c.env.DB
+        .prepare(`SELECT line_richmenu_id FROM rich_menus WHERE line_account_id = ? AND is_default = 1 LIMIT 1`)
+        .bind(accountId)
+        .first<{ line_richmenu_id: string | null }>();
+      lineRichmenuId = def?.line_richmenu_id ?? null;
+    }
+
+    if (!lineRichmenuId) return c.json({ success: true, data: { name: null, source } });
+    const rec = await c.env.DB
+      .prepare(`SELECT name FROM rich_menus WHERE line_richmenu_id = ? LIMIT 1`)
+      .bind(lineRichmenuId)
+      .first<{ name: string }>();
+    return c.json({ success: true, data: { name: rec?.name ?? '(名称不明)', source } });
+  } catch (err) {
+    console.error('GET /api/friends/:friendId/rich-menu error:', err);
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Internal server error' }, 500);
+  }
+});
+
 richMenus.post('/api/friends/:friendId/rich-menu', async (c) => {
   try {
     const friendId = c.req.param('friendId');

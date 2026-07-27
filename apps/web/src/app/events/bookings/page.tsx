@@ -20,6 +20,14 @@ function extractFormData(metadata: Record<string, unknown> | null): Record<strin
   return null
 }
 
+/** 予約フォームの回答があればそれ、無ければ応募フォームの回答を使う。 */
+function pickAnswers(b: { metadata: Record<string, unknown> | null; applicationData: Record<string, unknown> | null }): { data: Record<string, unknown> | null; source: 'booking' | 'application' | null } {
+  const booking = extractFormData(b.metadata)
+  if (booking && Object.keys(booking).length > 0) return { data: booking, source: 'booking' }
+  if (b.applicationData && Object.keys(b.applicationData).length > 0) return { data: b.applicationData, source: 'application' }
+  return { data: null, source: null }
+}
+
 function renderAnswer(value: unknown): string {
   if (value == null || value === '') return '（未回答）'
   if (Array.isArray(value)) return value.length === 0 ? '（未回答）' : value.join(', ')
@@ -42,6 +50,13 @@ function Inner() {
     [event],
   )
   const hasFormConfigured = fields.length > 0
+  // 定義を空にしたイベントでも、過去の予約に回答が残っていれば「回答」列を出す
+  const hasAnyAnswers = useMemo(
+    () => bookings.some((b) => pickAnswers(b).data != null),
+    [bookings],
+  )
+  const showAnswerCol = hasFormConfigured || hasAnyAnswers
+  const [applicationFields, setApplicationFields] = useState<FormFieldItem[]>([])
 
   const load = useCallback(async () => {
     if (!id) return
@@ -49,7 +64,7 @@ function Inner() {
     try {
       const [evRes, bkRes] = await Promise.all([api.events.get(id), api.events.bookings(id)])
       if (evRes.success) setEvent(evRes.data)
-      if (bkRes.success) setBookings(bkRes.data)
+      if (bkRes.success) { setBookings(bkRes.data); setApplicationFields((bkRes as { applicationFields?: FormFieldItem[] }).applicationFields ?? []) }
       else setError(bkRes.error)
     } catch {
       setError('読み込みに失敗しました')
@@ -91,15 +106,16 @@ function Inner() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">予約者</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">予約日時</th>
-                  {hasFormConfigured && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">回答</th>}
+                  {showAnswerCol && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">回答</th>}
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {bookings.map((b) => {
-                  const formData = extractFormData(b.metadata)
-                  const hasAnswers = !!formData && Object.keys(formData).length > 0
-                  const canExpand = hasFormConfigured && hasAnswers
+                  const picked = pickAnswers(b)
+                  const formData = picked.data
+                  const hasAnswers = formData != null
+                  const canExpand = hasAnswers
                   const isOpen = expandedId === b.id
                   return (
                     <Fragment key={b.id}>
@@ -115,9 +131,11 @@ function Inner() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500">{fmt(b.createdAt)}</td>
-                        {hasFormConfigured && (
+                        {showAnswerCol && (
                           <td className="px-4 py-3 text-xs text-gray-500">
-                            {hasAnswers ? `${Object.keys(formData!).length}項目` : <span className="text-gray-300">なし</span>}
+                            {hasAnswers ? (
+                              <span>{Object.keys(formData!).length}項目{picked.source === 'application' && <span className="ml-1 text-[10px] text-indigo-500">応募</span>}</span>
+                            ) : <span className="text-gray-300">なし</span>}
                           </td>
                         )}
                         <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
@@ -129,9 +147,10 @@ function Inner() {
                       {canExpand && isOpen && (
                         <tr className="bg-gray-50/60">
                           <td />
-                          <td colSpan={5 + (hasFormConfigured ? 1 : 0)} className="px-4 py-3">
+                          <td colSpan={5 + (showAnswerCol ? 1 : 0)} className="px-4 py-3">
+                            {picked.source === 'application' && <p className="text-[11px] text-indigo-500 mb-2">※ 予約時の入力ではなく、応募フォームの回答です</p>}
                             <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-xs">
-                              {fields.map((f) => {
+                              {(picked.source === 'application' ? applicationFields : fields).map((f) => {
                                 const v = formData?.[f.name]
                                 return (
                                   <div key={f.name} className="flex gap-2">
@@ -141,7 +160,7 @@ function Inner() {
                                 )
                               })}
                               {Object.entries(formData ?? {})
-                                .filter(([k]) => !fields.some((f) => f.name === k))
+                                .filter(([k]) => !(picked.source === 'application' ? applicationFields : fields).some((f) => f.name === k))
                                 .map(([k, v]) => (
                                   <div key={k} className="flex gap-2">
                                     <dt className="text-gray-400 shrink-0 min-w-[6rem]">{k}</dt>

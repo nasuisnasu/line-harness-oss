@@ -3,6 +3,7 @@ import {
   jstNow,
   getLineAccountById,
   addTagToFriend,
+  removeTagFromFriend,
   enrollFriendInScenario,
   getFriendByLineUserId,
   upsertFriend,
@@ -79,6 +80,10 @@ interface DbConsultationConfig {
   available_until_date: string | null;
   daily_booking_limit: number | null;
   monthly_booking_limit: number | null;
+  requires_payment_ticket: number;
+  requires_tag_id: string | null;
+  hide_booking_form: number;
+  application_form_id: string | null;
 }
 
 type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
@@ -137,6 +142,10 @@ function serializeConsultationConfig(row: DbConsultationConfig) {
     availableUntilDate: row.available_until_date,
     dailyBookingLimit: row.daily_booking_limit ?? null,
     monthlyBookingLimit: row.monthly_booking_limit ?? null,
+    requiresPaymentTicket: !!row.requires_payment_ticket,
+    requiresTagId: row.requires_tag_id ?? null,
+    hideBookingForm: !!row.hide_booking_form,
+    applicationFormId: row.application_form_id ?? null,
   };
 }
 
@@ -203,6 +212,53 @@ async function getEventBySlug(db: D1Database, slug: string): Promise<DbEvent | n
 
 async function getConsultationConfig(db: D1Database, eventId: string): Promise<DbConsultationConfig | null> {
   return db.prepare(`SELECT * FROM event_consultation_configs WHERE event_id = ?`).bind(eventId).first<DbConsultationConfig>();
+}
+
+/**
+ * 有料イベントの予約券を検証する。未使用で（slug 指定券なら）当該イベント向けの
+ * 券だけを有効とみなす。有効なら券idを返し、無効・使用済み・別イベント券なら null。
+ */
+async function findValidTicket(
+  db: D1Database,
+  ticketId: string,
+  slug: string,
+): Promise<{ id: string } | null> {
+  const t = (ticketId || '').trim();
+  if (!t) return null;
+  const row = await db
+    .prepare(
+      `SELECT id, event_slug, uses_remaining,
+              (datetime(created_at, '+6 months') > datetime('now', '+9 hours')) AS not_expired
+         FROM payment_tickets WHERE id = ?`,
+    )
+    .bind(t)
+    .first<{ id: string; event_slug: string | null; uses_remaining: number; not_expired: number }>();
+  // 残回数0（使い切り）・有効期限切れ（購入から6ヶ月）は無効。
+  if (!row || row.uses_remaining <= 0 || !row.not_expired) return null;
+  if (row.event_slug && row.event_slug !== slug) return null;
+  return { id: row.id };
+}
+
+/**
+ * 「このタグを持つ人だけ予約できる」ゲート。
+ * 戦略会議の無料枠は応募→手動選考なので、当選者にタグを付けて開錠する運用。
+ */
+async function hasRequiredTag(
+  db: D1Database,
+  requiredTagId: string | null,
+  lineUserId: string | null | undefined,
+): Promise<boolean> {
+  if (!requiredTagId) return true;      // ゲート未設定なら誰でも通す
+  if (!lineUserId) return false;
+  const row = await db
+    .prepare(
+      `SELECT 1 AS hit FROM friend_tags ft
+       JOIN friends f ON f.id = ft.friend_id
+       WHERE f.line_user_id = ? AND ft.tag_id = ? LIMIT 1`,
+    )
+    .bind(lineUserId, requiredTagId)
+    .first<{ hit: number }>();
+  return Boolean(row);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -326,6 +382,7 @@ events.put('/api/events/:id', async (c) => {
         availableUntilDate: string | null;
         dailyBookingLimit: number | null;
         monthlyBookingLimit: number | null;
+        requiresPaymentTicket: boolean;
       }>;
     }>();
 
@@ -375,6 +432,10 @@ events.put('/api/events/:id', async (c) => {
       if ('availableUntilDate' in cfg) { cSets.push('available_until_date = ?'); cVals.push(cfg.availableUntilDate ?? null); }
       if ('dailyBookingLimit' in cfg) { cSets.push('daily_booking_limit = ?'); cVals.push(cfg.dailyBookingLimit ?? null); }
       if ('monthlyBookingLimit' in cfg) { cSets.push('monthly_booking_limit = ?'); cVals.push(cfg.monthlyBookingLimit ?? null); }
+      if (cfg.requiresPaymentTicket !== undefined) { cSets.push('requires_payment_ticket = ?'); cVals.push(cfg.requiresPaymentTicket ? 1 : 0); }
+      if ('hideBookingForm' in cfg) { cSets.push('hide_booking_form = ?'); cVals.push((cfg as { hideBookingForm?: boolean }).hideBookingForm ? 1 : 0); }
+      if ('applicationFormId' in cfg) { cSets.push('application_form_id = ?'); cVals.push((cfg as { applicationFormId?: string | null }).applicationFormId ?? null); }
+      if ('requiresTagId' in cfg) { cSets.push('requires_tag_id = ?'); cVals.push((cfg as { requiresTagId?: string | null }).requiresTagId ?? null); }
       if (cSets.length > 0) {
         cSets.push('updated_at = ?');
         cVals.push(jstNow());
@@ -421,15 +482,32 @@ events.delete('/api/events/:id', async (c) => {
 events.get('/api/events/:id/bookings', async (c) => {
   try {
     const id = c.req.param('id');
+    // 審査制イベントは予約フォームを出さないので、回答は別の「応募フォーム」にある。
+    // イベント設定の application_form_id から、その友だちの最新応募を各予約に添える。
+    const cfgRow = await c.env.DB
+      .prepare(`SELECT application_form_id FROM event_consultation_configs WHERE event_id = ?`)
+      .bind(id)
+      .first<{ application_form_id: string | null }>();
+    const applicationFormId = cfgRow?.application_form_id ?? null;
+    let applicationFields: unknown[] = [];
+    if (applicationFormId) {
+      const ff = await c.env.DB.prepare(`SELECT fields FROM forms WHERE id = ?`)
+        .bind(applicationFormId).first<{ fields: string }>();
+      if (ff) applicationFields = JSON.parse(ff.fields || '[]');
+    }
     const result = await c.env.DB
       .prepare(
-        `SELECT b.*, f.display_name AS friend_display_name, f.line_user_id AS friend_line_user_id
+        `SELECT b.*, f.display_name AS friend_display_name, f.line_user_id AS friend_line_user_id,
+                (SELECT s.data FROM form_submissions s
+                   WHERE s.friend_id = b.friend_id
+                     AND (? IS NULL OR s.form_id = ?)
+                   ORDER BY s.created_at DESC LIMIT 1) AS application_data
          FROM calendar_bookings b
          LEFT JOIN friends f ON f.id = b.friend_id
          WHERE b.app_event_id = ?
          ORDER BY b.start_at ASC`,
       )
-      .bind(id)
+      .bind(applicationFormId, applicationFormId, id)
       .all<{
         id: string;
         connection_id: string;
@@ -443,9 +521,11 @@ events.get('/api/events/:id/bookings', async (c) => {
         status: string;
         metadata: string | null;
         created_at: string;
+        application_data: string | null;
       }>();
     return c.json({
       success: true,
+      applicationFields,
       data: result.results.map((r) => ({
         id: r.id,
         connectionId: r.connection_id,
@@ -458,6 +538,7 @@ events.get('/api/events/:id/bookings', async (c) => {
         endAt: r.end_at,
         status: r.status,
         metadata: r.metadata ? JSON.parse(r.metadata) : null,
+        applicationData: r.application_data ? JSON.parse(r.application_data) : null,
         createdAt: r.created_at,
       })),
     });
@@ -526,7 +607,9 @@ events.get('/api/public/events/:slug', async (c) => {
     // now (booking_form_fields_json). The legacy form_id link is ignored
     // here so events stop pulling from the global Forms tab.
     let bookingForm: { fields: unknown[]; submitLabel: string | null } | null = null;
-    if (config) {
+    // hide_booking_form=1 のときは、定義を残したまま予約フォームだけ出さない。
+    // （定義を空にすると管理画面が過去の回答をラベル表示できなくなるため）
+    if (config && !config.hide_booking_form) {
       const fields = JSON.parse(config.booking_form_fields_json || '[]') as unknown[];
       if (fields.length > 0) {
         bookingForm = { fields, submitLabel: config.booking_form_submit_label };
@@ -565,6 +648,23 @@ events.get('/api/public/events/:slug/slots', async (c) => {
     }
     const config = await getConsultationConfig(c.env.DB, event.id);
     if (!config) return c.json({ success: false, error: 'Config missing' }, 500);
+
+    // 決済ゲート：有料イベントは未使用の予約券が無いとスロットを見せない。
+    // ただし preview=1 は「表示専用」なので空き枠は返す（予約は book 側でブロック）。
+    if (config.requires_payment_ticket && c.req.query('preview') !== '1') {
+      const valid = await findValidTicket(c.env.DB, c.req.query('ticket') ?? '', slug);
+      if (!valid) {
+        return c.json({ success: true, data: { slots: [], paymentRequired: true } });
+      }
+    }
+
+    // 当選タグゲート：タグが無い人には空き枠を見せない（preview=1 は表示専用なので除外）
+    if (config.requires_tag_id && c.req.query('preview') !== '1') {
+      const ok = await hasRequiredTag(c.env.DB, config.requires_tag_id, c.req.query('lineUserId'));
+      if (!ok) {
+        return c.json({ success: true, data: { slots: [], tagRequired: true } });
+      }
+    }
 
     const fromStr = c.req.query('from');
     const toStr = c.req.query('to');
@@ -713,6 +813,60 @@ events.get('/api/public/events/:slug/slots', async (c) => {
   }
 });
 
+/**
+ * 今月（JST）の予約枠の消化状況。ランディングページが「今月の無料枠：残りN」を
+ * 出すために使う。monthly_booking_limit を「今月開放する枠数」とみなす。
+ */
+events.get('/api/public/events/:slug/availability', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    const event = await getEventBySlug(c.env.DB, slug);
+    if (!event || event.event_type !== 'consultation') {
+      return c.json({ success: false, error: 'Event not found' }, 404);
+    }
+    const config = await getConsultationConfig(c.env.DB, event.id);
+    if (!config) return c.json({ success: false, error: 'Config missing' }, 500);
+
+    const ym = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 7); // YYYY-MM (JST)
+    const row = await c.env.DB
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM calendar_bookings
+         WHERE app_event_id = ? AND status = 'confirmed'
+           AND substr(datetime(start_at, '+9 hours'), 1, 7) = ?`,
+      )
+      .bind(event.id, ym)
+      .first<{ cnt: number }>();
+    const used = row?.cnt ?? 0;
+    const monthlyLimit = config.monthly_booking_limit ?? null;
+    const remaining = monthlyLimit == null ? null : Math.max(0, monthlyLimit - used);
+
+    // 累計の参加者数（このイベントの全期間 confirmed）。LPの「すでに◯名が参加」用。
+    const totalRow = await c.env.DB
+      .prepare(`SELECT COUNT(*) as cnt FROM calendar_bookings WHERE app_event_id = ? AND status = 'confirmed'`)
+      .bind(event.id)
+      .first<{ cnt: number }>();
+    const totalConfirmed = totalRow?.cnt ?? 0;
+
+    return c.json({
+      success: true,
+      data: {
+        slug,
+        active: !!event.is_active,
+        recruitmentPaused: !!event.recruitment_paused,
+        monthlyLimit,
+        monthlyUsed: used,
+        monthlyRemaining: remaining,
+        totalConfirmed,
+        // 無料枠が今すぐ取れるか（停止中・非公開・満了は false）
+        open: !!event.is_active && !event.recruitment_paused && (remaining == null || remaining > 0),
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/public/events/:slug/availability error:', err);
+    return c.json({ success: false, error: err instanceof Error ? err.message : 'Internal server error' }, 500);
+  }
+});
+
 events.post('/api/public/events/:slug/book', async (c) => {
   try {
     const slug = c.req.param('slug');
@@ -722,6 +876,7 @@ events.post('/api/public/events/:slug/book', async (c) => {
       pictureUrl?: string;
       startAt: string;       // ISO datetime
       formData?: Record<string, unknown>;
+      ticket?: string;       // 有料イベントの予約券（決済で発行）
     }>();
     if (!body.lineUserId || !body.startAt) {
       return c.json({ success: false, error: 'lineUserId and startAt are required' }, 400);
@@ -737,6 +892,31 @@ events.post('/api/public/events/:slug/book', async (c) => {
     const config = await getConsultationConfig(c.env.DB, event.id);
     if (!config) return c.json({ success: false, error: 'Config missing' }, 500);
     if (!event.line_account_id) return c.json({ success: false, error: 'Event has no LINE account binding' }, 400);
+
+    // 決済ゲート：有料イベントは未使用の予約券が必須。実際の消費は予約成立後に行う。
+    let ticketToConsume: string | null = null;
+    if (config.requires_payment_ticket) {
+      const ticket = (body.ticket ?? c.req.query('ticket') ?? '').toString();
+      const valid = await findValidTicket(c.env.DB, ticket, slug);
+      if (!valid) {
+        return c.json(
+          { success: false, error: '有効な予約券がありません。先に決済を完了してください。', paymentRequired: true },
+          402,
+        );
+      }
+      ticketToConsume = valid.id;
+    }
+
+    // 当選タグゲート：選考を通っていない人は予約できない
+    if (config.requires_tag_id) {
+      const ok = await hasRequiredTag(c.env.DB, config.requires_tag_id, body.lineUserId);
+      if (!ok) {
+        return c.json(
+          { success: false, error: 'この枠は、応募のうえ選考を通過した方のみご予約いただけます。', tagRequired: true },
+          403,
+        );
+      }
+    }
 
     const account = await getLineAccountById(c.env.DB, event.line_account_id);
     if (!account) return c.json({ success: false, error: 'LINE account not found' }, 404);
@@ -800,35 +980,50 @@ events.post('/api/public/events/:slug/book', async (c) => {
 
     // One-booking-per-friend guard: prevent the same person from booking
     // the same consultation event more than once (cancellation frees the seat).
-    const dupBooking = await c.env.DB
-      .prepare(
-        `SELECT id, start_at FROM calendar_bookings
-         WHERE app_event_id = ? AND friend_id = ? AND status = 'confirmed'
-         LIMIT 1`,
-      )
-      .bind(event.id, friend.id)
-      .first<{ id: string; start_at: string }>();
-    if (dupBooking) {
-      const fmt = new Intl.DateTimeFormat('ja-JP', {
-        timeZone: 'Asia/Tokyo',
-        month: 'numeric', day: 'numeric',
-        hour: '2-digit', minute: '2-digit', hour12: false,
-      });
-      const when = fmt.format(new Date(dupBooking.start_at)); // e.g. "5/8 14:00"
-      return c.json({
-        success: false,
-        error: `すでにご予約が入っています（${when}）。お一人さま1回限りとなっております。日程変更やキャンセルをご希望の場合は、LINEでご連絡ください。`,
-      }, 409);
+    // 有料イベント（決済券制）は除外：券1枚 = 1予約なので、券を買えば何度でも予約できる。
+    // 無料イベントの1回制限は別途タグ側で担保している。
+    if (!config.requires_payment_ticket) {
+      const dupBooking = await c.env.DB
+        .prepare(
+          `SELECT id, start_at FROM calendar_bookings
+           WHERE app_event_id = ? AND friend_id = ? AND status = 'confirmed'
+           LIMIT 1`,
+        )
+        .bind(event.id, friend.id)
+        .first<{ id: string; start_at: string }>();
+      if (dupBooking) {
+        const fmt = new Intl.DateTimeFormat('ja-JP', {
+          timeZone: 'Asia/Tokyo',
+          month: 'numeric', day: 'numeric',
+          hour: '2-digit', minute: '2-digit', hour12: false,
+        });
+        const when = fmt.format(new Date(dupBooking.start_at)); // e.g. "5/8 14:00"
+        return c.json({
+          success: false,
+          error: `すでにご予約が入っています（${when}）。お一人さま1回限りとなっております。日程変更やキャンセルをご希望の場合は、LINEでご連絡ください。`,
+        }, 409);
+      }
     }
 
     // Last-mile race guard: re-check the slot is still available.
+    // グリッド（空き枠計算）は既存予約を [開始-before, 終了+after] にふくらませて
+    // 判定している。ここでも同じバッファを効かせないと、背中合わせの予約が
+    // すり抜けてインターバルが潰れる（レース時・グリッド陳腐化時）。
+    // 新予約の生の [startMs, endMs] が、既存の膨張区間と重なるかを見る:
+    //   start_at < endMs + before  かつ  end_at > startMs - after
+    const guardBefore = config.buffer_before_minutes;
+    const guardAfter = config.buffer_after_minutes;
     const existing = await c.env.DB
       .prepare(
         `SELECT id FROM calendar_bookings WHERE app_event_id = ? AND status = 'confirmed' AND start_at < ? AND end_at > ?`,
       )
-      .bind(event.id, new Date(endMs).toISOString(), new Date(startMs).toISOString())
+      .bind(
+        event.id,
+        new Date(endMs + guardBefore * 60_000).toISOString(),
+        new Date(startMs - guardAfter * 60_000).toISOString(),
+      )
       .first<{ id: string }>();
-    if (existing) return c.json({ success: false, error: 'この枠はすでに予約済みです' }, 409);
+    if (existing) return c.json({ success: false, error: 'この枠は予約できません（前後の予約と間隔が確保できません）' }, 409);
 
     // Event-specific booking form data is stored in the booking's metadata
     // (no separate form_submissions row, since the event isn't a global Form).
@@ -896,13 +1091,42 @@ events.post('/api/public/events/:slug/book', async (c) => {
       )
       .run();
 
-    // Fire-and-forget completion actions. Failures here don't roll back the
-    // booking — the operator has the GCal event and will follow up manually.
-    try {
-      if (config.on_complete_tag_id) await addTagToFriend(c.env.DB, friend.id, config.on_complete_tag_id);
-      if (config.on_complete_scenario_id) await enrollFriendInScenario(c.env.DB, friend.id, config.on_complete_scenario_id);
-    } catch (e) {
-      console.error('Booking completion actions failed (continuing):', e);
+    // 決済券を消費（残回数を1減らす）。予約成立後に burn するので GCal 失敗で
+    // 券が無駄にならない。回数券は残回数>0の間くり返し使え、0になったら status='used'。
+    // used_at / used_booking_id は最後に使った予約を指す。
+    if (ticketToConsume) {
+      try {
+        await c.env.DB
+          .prepare(
+            `UPDATE payment_tickets
+                SET uses_remaining = uses_remaining - 1,
+                    status = CASE WHEN uses_remaining <= 1 THEN 'used' ELSE 'unused' END,
+                    used_at = ?,
+                    used_booking_id = ?
+              WHERE id = ? AND uses_remaining > 0`,
+          )
+          .bind(now, bookingId, ticketToConsume)
+          .run();
+      } catch (e) {
+        console.error('Ticket consume failed (booking already created):', e);
+      }
+    }
+
+    // Fire-and-forget completion actions. 各アクションは独立してtryで包む。
+    // ひとつ（例：タグ付与）が失敗しても、当選タグの削除など後続が止まらないように。
+    // 予約が完了したら「当選タグ」は外す。当選タグは "今週ご案内する人" の印なので、
+    // 予約が済んだ人が残ると一斉配信が二重に飛び、カレンダーも開きっぱなしになる。最優先で実行。
+    if (config.requires_tag_id) {
+      try { await removeTagFromFriend(c.env.DB, friend.id, config.requires_tag_id); }
+      catch (e) { console.error('remove requires_tag failed (continuing):', e); }
+    }
+    if (config.on_complete_tag_id) {
+      try { await addTagToFriend(c.env.DB, friend.id, config.on_complete_tag_id); }
+      catch (e) { console.error('add on_complete_tag failed (continuing):', e); }
+    }
+    if (config.on_complete_scenario_id) {
+      try { await enrollFriendInScenario(c.env.DB, friend.id, config.on_complete_scenario_id); }
+      catch (e) { console.error('enroll on_complete_scenario failed (continuing):', e); }
     }
 
     // Confirmation push to the friend. Custom template (with placeholders)
@@ -943,13 +1167,35 @@ events.post('/api/public/events/:slug/book', async (c) => {
     }
 
     // Discord notification — best-effort, ignore failures.
+    // 審査制イベントは予約フォームを出さない（hide_booking_form=1）ので body.formData は空。
+    // 回答は応募フォーム（application_form_id）側にあるため、その友だちの最新応募を引いて
+    // 予約通知に同梱する。こうすると会議日に「新規予約」を全件取り込むだけでシートが埋まる
+    // （管理画面の予約一覧が application_data を join しているのと同じ発想）。
     try {
+      let notifyFormData: Record<string, unknown> | null = body.formData ?? null;
+      if ((!notifyFormData || Object.keys(notifyFormData).length === 0) && config.application_form_id) {
+        const sub = await c.env.DB
+          .prepare(
+            `SELECT data FROM form_submissions
+             WHERE friend_id = ? AND form_id = ?
+             ORDER BY created_at DESC LIMIT 1`,
+          )
+          .bind(friend.id, config.application_form_id)
+          .first<{ data: string }>();
+        if (sub?.data) {
+          try {
+            notifyFormData = JSON.parse(sub.data) as Record<string, unknown>;
+          } catch {
+            // 壊れたJSONは無視して従来どおり空で通知
+          }
+        }
+      }
       await notifyEventBooked(c.env.DISCORD_WEBHOOK_URL, {
         eventName: event.name,
         friendName: friend.display_name ?? body.lineUserId,
         startAt: new Date(startMs).toISOString(),
         zoomUrl: config.zoom_url,
-        formData: body.formData ?? null,
+        formData: notifyFormData,
       });
     } catch (e) {
       console.error('Discord notify failed (continuing):', e);

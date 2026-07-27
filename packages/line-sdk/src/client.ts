@@ -208,4 +208,21 @@ export class LineClient {
   async cancelDefaultRichMenu(): Promise<void> {
     await this.request('/user/all/richmenu', {}, 'DELETE');
   }
+
+  /**
+   * 現在のデフォルトリッチメニューID。未設定なら null。
+   * LINE は未設定時に 404 を返すため、それだけは例外にせず null を返す。
+   */
+  async getDefaultRichMenuId(): Promise<string | null> {
+    try {
+      const res = await this.request<{ richMenuId: string }>(
+        '/user/all/richmenu',
+        {},
+        'GET',
+      );
+      return res?.richMenuId ?? null;
+    } catch {
+      return null;
+    }
+  }
 }

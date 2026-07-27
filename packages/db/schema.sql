@@ -185,6 +185,28 @@ CREATE TABLE IF NOT EXISTS line_accounts (
   updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
+-- 生徒ごとの授業記録（回数制プランの消化管理）。
+CREATE TABLE IF NOT EXISTS friend_lesson_records (
+  id          TEXT PRIMARY KEY,
+  friend_id   TEXT NOT NULL REFERENCES friends (id) ON DELETE CASCADE,
+  type        TEXT NOT NULL,
+  count       INTEGER NOT NULL DEFAULT 1,
+  record_date TEXT NOT NULL,
+  note        TEXT,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_records_friend ON friend_lesson_records (friend_id);
+
+-- 営業カレンダー（休業日）設定。アカウントごとに1行。
+CREATE TABLE IF NOT EXISTS business_calendar (
+  line_account_id TEXT PRIMARY KEY,
+  closed_weekdays TEXT NOT NULL DEFAULT '[]',
+  closed_dates    TEXT NOT NULL DEFAULT '[]',
+  notice          TEXT,
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
 -- ============================================================
 -- Round 2: Conversion Points (CV Tracking)
 -- ============================================================
