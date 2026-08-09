@@ -42,8 +42,9 @@ const _stateParams = new URLSearchParams(_liffState.startsWith('?') ? _liffState
 const LIFF_ID = _stateParams.get('liffId') || _rawParams.get('liffId') || import.meta.env?.VITE_LIFF_ID || '';
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 const UUID_STORAGE_KEY = 'lh_uuid';
+// 既定は受講生専用OA。URL に liffId が載っていればそちらが優先される。
+// 大学受験攻略（2009821004-brTkmVVK / @513qujqi）は運用終了のため既定から外した。
 const _LIFF_BOT_MAP: Record<string, string> = {
-  '2009821004-brTkmVVK': '@513qujqi',  // 大学受験攻略
   '2006855304-UfNPHFOn': '@893nrbyp',  // 元英弱ニキ
   '2009506707-tX5TQVsB': '@009rqkeq',  // 元英弱ニキ@受講生専用
 };

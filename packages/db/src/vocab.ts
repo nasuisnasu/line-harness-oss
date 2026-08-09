@@ -217,6 +217,44 @@ export async function getVocabDecoys(
   return rows.results;
 }
 
+// ── 使う単語帳の選択 ────────────────────────────────────────────────────────
+
+/**
+ * 生徒が使うと決めた単語帳。`friends.metadata` の `vocab_book_id` に持つ。
+ *
+ * 専用の列やテーブルを足さないのは、この1個のためにmigrationを増やしたくないため。
+ * **書き込みは必ず `json_set` で行う。** metadata はフォームやシナリオ配信も
+ * 使っているので、文字列ごと上書きすると他機能のデータを壊す。
+ */
+export async function getSelectedBookId(db: D1Database, friendId: string): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `SELECT json_extract(COALESCE(NULLIF(metadata, ''), '{}'), '$.vocab_book_id') AS book_id
+       FROM friends WHERE id = ?`,
+    )
+    .bind(friendId)
+    .first<{ book_id: number | string | null }>();
+  const v = row?.book_id;
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export async function setSelectedBookId(
+  db: D1Database,
+  friendId: string,
+  bookId: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE friends
+       SET metadata = json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.vocab_book_id', ?)
+       WHERE id = ?`,
+    )
+    .bind(bookId, friendId)
+    .run();
+}
+
 // ── 習得率 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -344,6 +382,8 @@ export interface DashboardBook extends Mastery {
 }
 
 export interface VocabDashboard {
+  /** 生徒が選んだ単語帳。null なら初回なので、アプリは単語帳の選択画面を出す。 */
+  selected_book_id: number | null;
   books: DashboardBook[];
   recent: { enough: boolean; needed: number; latest_rate: number | null; sessions: RecentSession[] };
   weak_words: WeakWord[];
@@ -425,7 +465,14 @@ export async function getVocabDashboard(
 
   const enough = sessions.length >= MIN_SESSIONS_FOR_TREND;
 
+  // 選択済みでも、その単語帳が非表示になっていたら未選択に戻す
+  // （ダミー単語帳を active=0 にしたときに、選んだままの生徒が固まらないように）
+  const savedBookId = await getSelectedBookId(db, friendId);
+  const selectedBookId =
+    savedBookId !== null && dashboardBooks.some((b) => b.id === savedBookId) ? savedBookId : null;
+
   return {
+    selected_book_id: selectedBookId,
     books: dashboardBooks,
     recent: {
       enough,

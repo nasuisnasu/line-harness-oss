@@ -7,7 +7,7 @@
  *
  *   生徒 ──(idToken)──▶ /api/eijaku/materials ──(共有鍵)──▶ eijaku-ai /shelf/for-line/:userId
  *
- * 生徒用は LIFF の idToken、講師用は API_KEY。認証経路を混ぜないこと。
+ * 生徒用は LIFF の idToken、棚からの呼び出しは共有鍵。認証経路を混ぜないこと。
  * 生徒用は authMiddleware をスキップさせているので、**このファイルのゲートが唯一の壁**。
  * 単語テストと同じ3段（routes/vocab.ts の requireStudent と同じ考え方）を通す。
  */
@@ -121,10 +121,19 @@ eijakuMaterials.get('/api/eijaku/materials', async (c) => {
 });
 
 /**
- * 講師用。棚の管理画面で「生徒を追加」するときの選択肢。
- * 受講生タグの付いた友だちだけを返す。API_KEY で守る（authMiddleware がかかる経路）。
+ * 棚の管理画面で「生徒を追加」するときの選択肢。受講生タグの付いた友だちだけを返す。
+ *
+ * 呼ぶのは棚のワーカーだけ。ブラウザからは叩かせない。
+ * 認証は**教材一覧と同じ共有鍵**（X-Shelf-Key）。管理用の API_KEY は使わない
+ * ── 鍵を1本に絞ったほうが、行き違いで片方だけ古くなる事故が起きない。
  */
 eijakuMaterials.get('/api/eijaku/students', async (c) => {
+  const shared = c.env.SHELF_API_KEY;
+  if (!shared) return c.json({ success: false, error: 'サーバーの設定が完了していません' }, 503);
+  if (c.req.header('X-Shelf-Key') !== shared) {
+    return c.json({ success: false, error: 'Unauthorized' }, 401);
+  }
+
   const lineAccountId = c.env.VOCAB_LINE_ACCOUNT_ID;
   const allowTagId = c.env.VOCAB_ALLOW_TAG_ID;
   if (!lineAccountId || !allowTagId) {

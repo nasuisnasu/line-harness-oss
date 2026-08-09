@@ -28,8 +28,8 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     (path.startsWith('/api/vocab/') && !path.startsWith('/api/vocab/admin')) ||
     // 授業教材の生徒用API。同じく Authorization を idToken に使うので素通しし、
     // routes/eijaku-materials.ts の requireStudent() で3段のゲートをかける。
-    // 講師用の /api/eijaku/students は素通ししない（API_KEY で守る）。
-    path === '/api/eijaku/materials'
+    // /api/eijaku/students も同様に素通しし、ルート側で共有鍵（X-Shelf-Key）を確かめる。
+    path.startsWith('/api/eijaku/')
   ) {
     return next();
   }

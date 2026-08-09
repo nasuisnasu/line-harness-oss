@@ -63,6 +63,8 @@ interface DashboardBook {
 }
 
 interface Dashboard {
+  /** null なら未選択。単語帳の選択画面から始める。 */
+  selected_book_id: number | null;
   books: DashboardBook[];
   recent: {
     enough: boolean;
@@ -84,10 +86,13 @@ type Kind = 'normal' | 'review' | 'retry';
 
 // ── 状態 ────────────────────────────────────────────────────────────────────
 
+/** 範囲は100語ブロック単位でしか選ばせない。キリ番以外を使う場面が無いため。 */
+const BLOCK = 100;
+
 const cfg = {
   bookId: 0,
   from: 1,
-  to: 20,
+  to: 100,
   lim: 20,
   fmt: 'choice' as 'choice' | 'recall',
   dir: 'ej' as 'ej' | 'je',
@@ -114,6 +119,7 @@ const state = {
   timer: null as number | null,
   tEnd: 0,
   sending: false,
+  switchingBook: false,
   lastResult: null as {
     total: number;
     correct: number;
@@ -247,6 +253,9 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-ghost{width:100%;margin-top:8px;padding:14px;border:1px solid var(--line2);background:var(--surface2);
   color:var(--fg);font-size:15px;font-weight:600;border-radius:10px;cursor:pointer}
 .v-ghost:active{transform:scale(.99)}
+/* ボタンの直後にカードが続くと詰まって見えるので、ここで区切りを作る */
+.v-go + .v-card, .v-ghost + .v-card, .v-go + .v-list, .v-ghost + .v-list,
+.v-go + .v-stats, .v-ghost + .v-stats, .v-go + .v-mastery, .v-ghost + .v-mastery{margin-top:26px}
 .v-books{display:flex;flex-wrap:wrap;gap:8px}
 .v-book{border:1px solid var(--line2);background:var(--surface2);color:var(--fg2);
   padding:10px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;
@@ -304,6 +313,46 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-list li .j{color:var(--fg2);font-size:13.5px}
 .v-list li .x{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ng);margin-left:6px}
 .v-list li .t{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ng)}
+
+/* ── 単語帳の選択 ── */
+.v-pick{display:block;width:100%;text-align:left;border:1px solid var(--line2);background:var(--surface);
+  color:var(--fg);border-radius:12px;padding:18px 16px;margin:0 0 10px;cursor:pointer}
+.v-pick.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.v-pick b{display:block;font-size:16.5px;font-weight:700;letter-spacing:-.02em}
+.v-pick em{display:block;font-style:normal;font-family:"JetBrains Mono",monospace;font-size:11.5px;
+  color:var(--fg3);margin-top:4px}
+.v-pick:active{transform:scale(.995)}
+.v-switch{display:block;margin:2px 0 14px;background:none;border:none;color:var(--fg3);
+  font-size:12.5px;text-decoration:underline;cursor:pointer;padding:0}
+
+/* ── 習得の内訳 ── */
+.v-seg{height:10px;border-radius:99px;overflow:hidden;display:flex;margin:14px 0 10px;
+  background:var(--surface2);border:1px solid var(--line2)}
+.v-seg i{display:block;height:100%;background:var(--accent)}
+.v-seg u{display:block;height:100%;background:color-mix(in srgb,var(--ng) 55%,transparent)}
+.v-key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--fg2)}
+.v-key span{display:flex;align-items:center;gap:6px}
+.v-key i{width:8px;height:8px;border-radius:50%;display:block;flex:none}
+.v-key .k1 i{background:var(--accent)}
+.v-key .k2 i{background:color-mix(in srgb,var(--ng) 55%,transparent)}
+.v-key .k3 i{background:transparent;border:1px solid var(--line2)}
+.v-key b{font-family:"JetBrains Mono",monospace;font-weight:600;color:var(--fg)}
+.v-note{font-size:12.5px;color:var(--fg3);line-height:1.7;margin:12px 0 0}
+
+/* ── 範囲スライダー ── */
+.v-rng{font-family:"JetBrains Mono",monospace;font-size:24px;font-weight:700;letter-spacing:-.02em;
+  display:flex;align-items:baseline;gap:8px;margin:0 0 2px}
+.v-rng small{font-size:12px;color:var(--fg3);font-weight:500}
+.v-sl{display:flex;align-items:center;gap:12px;margin:14px 0 0}
+.v-sl span{font-size:11.5px;color:var(--fg3);width:34px;flex:none}
+.v-sl input[type=range]{flex:1;-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}
+.v-sl input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:var(--line2)}
+.v-sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:26px;height:26px;
+  border-radius:50%;background:var(--accent);border:none;margin-top:-11px;
+  box-shadow:0 0 0 1px var(--bg),0 2px 8px rgba(0,0,0,.35)}
+.v-sl input[type=range]::-moz-range-track{height:4px;border-radius:99px;background:var(--line2)}
+.v-sl input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
+  background:var(--accent);border:none}
 
 /* ── 出題 ── */
 .v-stage{background:var(--surface);border:1px solid var(--line);border-radius:14px;
@@ -425,19 +474,83 @@ function sparkline(rates: number[]): string {
   </svg>`;
 }
 
+/** 習得の内訳。3つの状態を同じ言葉で、同じ場所に出す。 */
 function masteryCard(b: DashboardBook): string {
-  const mastered = b.total ? (b.mastered / b.total) * 100 : 0;
-  const unmastered = b.total ? (b.unmastered / b.total) * 100 : 0;
+  const w1 = b.total ? (b.mastered / b.total) * 100 : 0;
+  const w2 = b.total ? (b.unmastered / b.total) * 100 : 0;
   return `
 <div class="v-mastery">
   <div class="nm">${esc(b.name)}</div>
-  <div class="big"><b>${pct(b.rate)}</b><span>${b.mastered} / ${b.total}</span></div>
-  <div class="v-mbar">
-    <i style="width:${mastered.toFixed(2)}%"></i><u style="width:${unmastered.toFixed(2)}%"></u>
+  <div class="big"><b>${pct(b.rate)}</b><span>${b.mastered} / ${b.total} 語</span></div>
+  <div class="v-seg">
+    <i style="width:${w1.toFixed(2)}%"></i><u style="width:${w2.toFixed(2)}%"></u>
   </div>
-  <div class="v-mlegend">未習得 ${b.unmastered} ／ 未挑戦 ${b.untried}</div>
+  <div class="v-key">
+    <span class="k1"><i></i>習得済み <b>${b.mastered}</b></span>
+    <span class="k2"><i></i>復習が必要 <b>${b.unmastered}</b></span>
+    <span class="k3"><i></i>未挑戦 <b>${b.untried}</b></span>
+  </div>
+  <p class="v-note">
+    テストで間違えた語は「復習が必要」に入ります。次のテストで正解すると「習得済み」に移ります。
+  </p>
 </div>`;
 }
+
+// ── 単語帳の選択 ────────────────────────────────────────────────────────────
+
+/**
+ * 最初に必ず1冊選ばせる。だいたいの生徒はどちらか片方しか使わないので、
+ * 毎回選ばせるのではなく1回決めて覚えておく（選択は friends.metadata に入る）。
+ */
+function renderBookPicker(canCancel: boolean): void {
+  const body = `
+<p class="v-sub">使っている単語帳を選んでください。あとから切り替えられます。</p>
+${state.books
+  .map(
+    (b) =>
+      `<button class="v-pick${b.id === cfg.bookId ? ' on' : ''}" data-book="${b.id}">
+         <b>${esc(b.name)}</b><em>${b.count} 語</em>
+       </button>`,
+  )
+  .join('')}
+${canCancel ? '<button class="v-ghost" id="vCancel">やめる</button>' : ''}`;
+
+  app().innerHTML = shell('単語帳を選ぶ', '', body);
+
+  document.querySelectorAll<HTMLElement>('.v-pick').forEach((el) => {
+    el.onclick = async () => {
+      if (state.switchingBook) return;
+      state.switchingBook = true;
+      const bookId = Number(el.dataset.book);
+      try {
+        await api('/api/vocab/book', { method: 'PUT', body: JSON.stringify({ book_id: bookId }) });
+        cfg.bookId = bookId;
+        resetRangeForBook();
+        state.dashboard = null;
+        await showHome();
+      } catch (e) {
+        renderError(e instanceof Error ? e.message : '保存に失敗しました');
+      } finally {
+        state.switchingBook = false;
+      }
+    };
+  });
+  const cancel = document.getElementById('vCancel');
+  if (cancel) cancel.onclick = () => void showHome();
+}
+
+/** 単語帳を変えたら範囲を既定（1〜100）に戻す。前の単語帳の範囲が残ると事故る。 */
+function resetRangeForBook(): void {
+  const book = state.books.find((b) => b.id === cfg.bookId);
+  const max = book ? book.max_no : BLOCK;
+  cfg.from = 1;
+  cfg.to = Math.min(BLOCK, Math.max(BLOCK, Math.ceil(max / BLOCK) * BLOCK));
+  if (cfg.to > max) cfg.to = Math.ceil(max / BLOCK) * BLOCK;
+  cfg.to = Math.min(cfg.to, Math.ceil(max / BLOCK) * BLOCK);
+  cfg.lim = 20;
+}
+
+// ── ホーム ──────────────────────────────────────────────────────────────────
 
 async function showHome(): Promise<void> {
   renderLoading();
@@ -459,23 +572,34 @@ async function showHome(): Promise<void> {
     return;
   }
 
-  const top = d.books[0];
-  if (top && !cfg.bookId) cfg.bookId = top.id;
+  // 未選択なら選択画面から。選択済みならその1冊だけを見せる。
+  if (!d.selected_book_id) {
+    cfg.bookId = 0;
+    renderBookPicker(false);
+    return;
+  }
+  if (cfg.bookId !== d.selected_book_id) {
+    cfg.bookId = d.selected_book_id;
+    resetRangeForBook();
+  }
+
+  const book = d.books.find((b) => b.id === cfg.bookId);
+  if (!book) {
+    renderBookPicker(false);
+    return;
+  }
 
   const hasHistory = d.totals.sessions > 0;
 
-  // 復習キュー
-  const reviewBlock = top
-    ? `<div class="v-lead">
-         <div class="cap">まだ覚えてない語</div>
-         <div class="n">${top.review_count}<em>語</em></div>
-         <button class="v-go" id="vReview" ${top.review_count ? '' : 'disabled'}>
-           ${top.review_count ? 'まとめて復習する' : 'いまのところありません'}
-         </button>
-       </div>`
-    : '';
+  const reviewBlock = book.unmastered
+    ? `<button class="v-go" id="vReview">復習が必要な語を解く</button>
+       <p class="v-note" style="margin:8px 0 0;text-align:center">
+         ${book.unmastered}語のうち、番号の若い順に${Math.min(book.unmastered, 20)}語
+       </p>`
+    : hasHistory
+      ? '<p class="v-note" style="text-align:center">復習が必要な語はいまありません。</p>'
+      : '';
 
-  // 最近の正答率 — 3セッション未満は数字を出さない
   const trendBlock = d.recent.enough
     ? `<div class="v-card">
          <span class="lg">最近の正答率</span>
@@ -491,7 +615,7 @@ async function showHome(): Promise<void> {
 
   const weakBlock = d.weak_words.length
     ? `<div class="v-list">
-         <h3>よく間違える語</h3>
+         <h3>くり返し間違えている語</h3>
          <ul>${d.weak_words
            .map(
              (w) => `<li><span class="n">${no3(w.no)}</span><span class="e">${esc(w.en)}<span class="x">×${
@@ -511,21 +635,23 @@ async function showHome(): Promise<void> {
     : '';
 
   const body = hasHistory
-    ? d.books.filter((b) => b.mastered || b.unmastered || b.id === cfg.bookId).map(masteryCard).join('') +
+    ? masteryCard(book) +
       reviewBlock +
       '<button class="v-ghost" id="vStart">テストを始める</button>' +
       '<button class="v-ghost" id="vRecords">記録を見る</button>' +
       trendBlock +
       weakBlock +
-      totalsBlock
+      totalsBlock +
+      '<button class="v-switch" id="vSwitch">単語帳を切り替える</button>'
     : // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
       `<div class="v-lead">
-         <div class="cap">はじめまして</div>
+         <div class="cap">${esc(book.name)}</div>
          <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは20語やってみましょう</div>
        </div>
-       <button class="v-go" id="vStart">テストを始める</button>`;
+       <button class="v-go" id="vStart">テストを始める</button>
+       <button class="v-switch" id="vSwitch">単語帳を切り替える</button>`;
 
-  app().innerHTML = shell('', state.books.find((b) => b.id === cfg.bookId)?.name ?? '', body);
+  app().innerHTML = shell('', book.name, body);
 
   const bind = (id: string, fn: () => void) => {
     const el = document.getElementById(id);
@@ -534,57 +660,59 @@ async function showHome(): Promise<void> {
   bind('vStart', () => renderSetup());
   bind('vRecords', () => void showRecords());
   bind('vReview', () => void startReview());
+  bind('vSwitch', () => renderBookPicker(true));
 }
 
 // ── 設定 ────────────────────────────────────────────────────────────────────
 
+function blockMax(book: Book): number {
+  return Math.ceil(book.max_no / BLOCK);
+}
+
 function renderSetup(): void {
-  const book = state.books.find((b) => b.id === cfg.bookId) || state.books[0];
+  const book = state.books.find((b) => b.id === cfg.bookId);
   if (!book) return;
-  cfg.bookId = book.id;
-  if (cfg.to > book.max_no) {
-    cfg.from = 1;
-    cfg.to = Math.min(20, book.max_no);
-    cfg.lim = cfg.to;
-  }
+
+  const nBlocks = blockMax(book);
+  let fromBlk = Math.min(Math.max(Math.floor((cfg.from - 1) / BLOCK), 0), nBlocks - 1);
+  let toBlk = Math.min(Math.max(Math.ceil(cfg.to / BLOCK) - 1, fromBlk), nBlocks - 1);
 
   const chip = (group: string, v: string, label: string, on: boolean) =>
     `<button class="v-chip${on ? ' on' : ''}" data-g="${group}" data-v="${v}">${esc(label)}</button>`;
 
   const sectionChips = book.sections
-    .map((s) => `<button class="v-chip" data-sec="${s.from}-${s.to}">${esc(s.name.split(' ')[0] || s.name)}</button>`)
+    .map(
+      (sec) =>
+        `<button class="v-chip" data-sec="${sec.from}-${sec.to}">${esc(
+          sec.name.split(' ').slice(0, 2).join(' ') || sec.name,
+        )}</button>`,
+    )
     .join('');
 
   const body = `
 <div class="v-card">
-  <span class="lg">Book</span>
-  <div class="v-books">
-    ${state.books
-      .map(
-        (b) =>
-          `<button class="v-book${b.id === cfg.bookId ? ' on' : ''}" data-book="${b.id}">${esc(
-            b.name,
-          )}<em>${b.count} 語</em></button>`,
-      )
-      .join('')}
+  <span class="lg">Range</span>
+  <div class="v-rng" id="vRngLabel"></div>
+  <div class="v-hint" id="vRngCount"></div>
+  <div class="v-sl">
+    <span>はじめ</span>
+    <input type="range" id="vFromSl" min="0" max="${nBlocks - 1}" step="1" value="${fromBlk}">
+  </div>
+  <div class="v-sl">
+    <span>おわり</span>
+    <input type="range" id="vToSl" min="0" max="${nBlocks - 1}" step="1" value="${toBlk}">
+  </div>
+  <div class="v-row" style="margin-top:14px">
+    ${sectionChips}
+    <button class="v-chip" data-sec="1-${book.max_no}">ぜんぶ</button>
   </div>
 </div>
 
 <div class="v-card">
-  <span class="lg">Range</span>
+  <span class="lg">出題数</span>
   <div class="v-row">
-    <input class="v-num" id="vFrom" type="number" inputmode="numeric" min="1" max="${book.max_no}" value="${cfg.from}">
-    <span class="v-hint">〜</span>
-    <input class="v-num" id="vTo" type="number" inputmode="numeric" min="1" max="${book.max_no}" value="${cfg.to}">
-    <span class="v-hint">番</span>
+    ${[10, 20, 30, 50].map((n) => chip('lim', String(n), `${n}問`, cfg.lim === n)).join('')}
   </div>
-  ${sectionChips ? `<div class="v-row" style="margin-top:10px">${sectionChips}</div>` : ''}
-  <div class="v-row" style="margin-top:12px">
-    <span class="v-hint">出題数</span>
-    <input class="v-num" id="vLim" type="number" inputmode="numeric" min="1" max="100" value="${cfg.lim}">
-    <span class="v-hint">問（最大100）</span>
-  </div>
-  <p class="v-hint" id="vRangeMastery" style="margin:12px 0 0"></p>
 </div>
 
 <div class="v-card">
@@ -606,9 +734,7 @@ function renderSetup(): void {
 <div class="v-card">
   <span class="lg">Timer</span>
   <div class="v-row">
-    ${[0, 3, 5, 10, 15]
-      .map((s) => chip('tmr', String(s), s ? `${s}秒` : 'なし', cfg.tmr === s))
-      .join('')}
+    ${[0, 3, 5, 10, 15].map((n) => chip('tmr', String(n), n ? `${n}秒` : 'なし', cfg.tmr === n)).join('')}
   </div>
 </div>
 
@@ -618,64 +744,63 @@ function renderSetup(): void {
 
   app().innerHTML = shell('', book.name, body);
 
-  document.querySelectorAll<HTMLElement>('.v-book').forEach((b) => {
+  const fromSl = document.getElementById('vFromSl') as HTMLInputElement;
+  const toSl = document.getElementById('vToSl') as HTMLInputElement;
+
+  const paint = () => {
+    // 範囲は必ず 100語ブロックの境界に乗せる（1〜100 / 301〜700 のような形にしかならない）
+    cfg.from = fromBlk * BLOCK + 1;
+    cfg.to = Math.min((toBlk + 1) * BLOCK, book.max_no);
+    const span = cfg.to - cfg.from + 1;
+    document.getElementById('vRngLabel')!.textContent = `${cfg.from} 〜 ${cfg.to}`;
+    document.getElementById('vRngCount')!.textContent = `この範囲に ${span} 語（${cfg.lim}問を出題）`;
+  };
+
+  fromSl.oninput = () => {
+    fromBlk = Number(fromSl.value);
+    if (fromBlk > toBlk) {
+      toBlk = fromBlk;
+      toSl.value = String(toBlk);
+    }
+    paint();
+  };
+  toSl.oninput = () => {
+    toBlk = Number(toSl.value);
+    if (toBlk < fromBlk) {
+      fromBlk = toBlk;
+      fromSl.value = String(fromBlk);
+    }
+    paint();
+  };
+
+  document.querySelectorAll<HTMLElement>('.v-chip[data-sec]').forEach((b) => {
     b.onclick = () => {
-      cfg.bookId = Number(b.dataset.book);
-      renderSetup();
+      const [f, t] = b.dataset.sec!.split('-').map(Number);
+      fromBlk = Math.floor((f - 1) / BLOCK);
+      toBlk = Math.min(Math.ceil(t / BLOCK) - 1, nBlocks - 1);
+      fromSl.value = String(fromBlk);
+      toSl.value = String(toBlk);
+      paint();
     };
   });
+
   document.querySelectorAll<HTMLElement>('.v-chip[data-g]').forEach((b) => {
     b.onclick = () => {
       const g = b.dataset.g!;
       document.querySelectorAll<HTMLElement>(`.v-chip[data-g="${g}"]`).forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       if (g === 'tmr') cfg.tmr = Number(b.dataset.v);
+      else if (g === 'lim') cfg.lim = Number(b.dataset.v);
       else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
       else if (g === 'dir') cfg.dir = b.dataset.v as 'ej' | 'je';
       else if (g === 'ord') cfg.ord = b.dataset.v as 'seq' | 'rnd';
+      if (g === 'lim') paint();
     };
   });
-  document.querySelectorAll<HTMLElement>('.v-chip[data-sec]').forEach((b) => {
-    b.onclick = () => {
-      const [f, t] = b.dataset.sec!.split('-').map(Number);
-      (document.getElementById('vFrom') as HTMLInputElement).value = String(f);
-      (document.getElementById('vTo') as HTMLInputElement).value = String(t);
-      syncRange();
-    };
-  });
-
-  const syncRange = () => {
-    const f = Number((document.getElementById('vFrom') as HTMLInputElement).value) || 1;
-    const t = Number((document.getElementById('vTo') as HTMLInputElement).value) || 1;
-    cfg.from = Math.min(f, t);
-    cfg.to = Math.max(f, t);
-    const span = cfg.to - cfg.from + 1;
-    const lim = document.getElementById('vLim') as HTMLInputElement;
-    lim.value = String(Math.min(span, 100));
-    cfg.lim = Number(lim.value);
-    showRangeMastery();
-  };
-  (document.getElementById('vFrom') as HTMLInputElement).oninput = syncRange;
-  (document.getElementById('vTo') as HTMLInputElement).oninput = syncRange;
-  (document.getElementById('vLim') as HTMLInputElement).oninput = (e) => {
-    cfg.lim = Number((e.target as HTMLInputElement).value) || 1;
-  };
 
   document.getElementById('vBack')!.onclick = () => void showHome();
   document.getElementById('vBegin')!.onclick = () => void startNormal();
-  showRangeMastery();
-}
-
-/** 範囲を選んだ時点で「その範囲の習得率」を出す。どこをやるかの判断材料になる。 */
-function showRangeMastery(): void {
-  const el = document.getElementById('vRangeMastery');
-  if (!el || !state.dashboard) return;
-  const b = state.dashboard.books.find((x) => x.id === cfg.bookId);
-  if (!b || (!b.mastered && !b.unmastered)) {
-    el.textContent = '';
-    return;
-  }
-  el.textContent = `この単語帳の習得率 ${pct(b.rate)}（${b.mastered}/${b.total}）`;
+  paint();
 }
 
 function say(msg: string): void {
@@ -975,7 +1100,7 @@ function renderResult(sending: boolean): void {
     ? `<div class="v-card">
          <span class="lg">習得率</span>
          <div class="v-delta">${pct(r.mastery.before)} → <b>${pct(r.mastery.after)}</b>
-           <span style="color:var(--fg3)">（${r.mastery.mastered}/${r.mastery.total}）</span></div>
+           <span style="color:var(--fg3)">（習得済み ${r.mastery.mastered}/${r.mastery.total}語）</span></div>
          ${
            r.range_mastery
              ? `<div class="v-delta" style="margin-top:6px;font-size:12.5px">この範囲 ${pct(
@@ -995,7 +1120,7 @@ function renderResult(sending: boolean): void {
   <span>正答率 ${state.log.length ? pct(ok.length / state.log.length) : '—'}</span>
 </div>
 ${delta}
-${listBlock('できなかった', ng, false)}
+${listBlock('できなかった（復習が必要に入りました）', ng, false)}
 ${listBlock('できた', ok, true)}
 <p class="v-hint" style="margin:0 0 8px">コピーは単語帳の番号順に並びます。</p>
 <div class="v-cp">
@@ -1139,7 +1264,7 @@ async function showRecords(): Promise<void> {
     </div>`;
 
   const weak = rec.weak_words.length
-    ? `<div class="v-list"><h3>よく間違える語</h3>
+    ? `<div class="v-list"><h3>くり返し間違えている語</h3>
          <ul>${rec.weak_words
            .map(
              (w) =>

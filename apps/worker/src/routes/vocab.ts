@@ -20,6 +20,8 @@ import {
   getVocabRecords,
   saveVocabSession,
   getVocabSessionAnswers,
+  getSelectedBookId,
+  setSelectedBookId,
   getVocabStudents,
   getVocabStudentDetail,
   upsertVocabBook,
@@ -167,6 +169,24 @@ vocab.get('/api/vocab/words', async (c) => {
     : [];
 
   return c.json({ success: true, words, decoys });
+});
+
+/** 使う単語帳を決める／あとから切り替える。 */
+vocab.put('/api/vocab/book', async (c) => {
+  const gate = await requireStudent(c);
+  if (!gate.ok) {
+    const d = denied(gate.status);
+    return c.json(d.body, d.status);
+  }
+  const body = await c.req.json<{ book_id?: number }>();
+  const bookId = Number(body.book_id);
+  if (!bookId) return c.json({ success: false, error: 'book_id は必須です' }, 400);
+
+  const book = await getVocabBookById(c.env.DB, bookId);
+  if (!book || !book.active) return c.json({ success: false, error: '単語帳が見つかりません' }, 404);
+
+  await setSelectedBookId(c.env.DB, gate.friend.id, bookId);
+  return c.json({ success: true, selected_book_id: await getSelectedBookId(c.env.DB, gate.friend.id) });
 });
 
 vocab.get('/api/vocab/review', async (c) => {
