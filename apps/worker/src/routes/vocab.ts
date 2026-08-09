@@ -303,7 +303,9 @@ vocab.post('/api/vocab/sessions', async (c) => {
 
 vocab.get('/api/vocab/admin/students', async (c) => {
   const lineAccountId = c.req.query('lineAccountId') || c.env.VOCAB_LINE_ACCOUNT_ID || null;
-  const tagId = c.req.query('tagId') || null;
+  // 既定で受講生タグに絞る。単語テストを開けるのはタグ持ちだけなので、
+  // 一覧に保護者やタグ無しの友だちが混ざると「未実施」の数が意味を失う。
+  const tagId = c.req.query('tagId') || c.env.VOCAB_ALLOW_TAG_ID || null;
   const students = await getVocabStudents(c.env.DB, lineAccountId, tagId);
   return c.json({ success: true, students });
 });
