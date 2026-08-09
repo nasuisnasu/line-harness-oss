@@ -1184,6 +1184,12 @@ export type VocabStudentRow = {
   sessions: number
   answers: number
   latest_rate: number | null
+  book_name: string | null
+  total: number
+  mastered: number
+  unmastered: number
+  untried: number
+  rate: number | null
 }
 
 export type VocabBookMastery = {

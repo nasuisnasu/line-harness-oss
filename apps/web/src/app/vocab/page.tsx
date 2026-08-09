@@ -30,7 +30,7 @@ function daysSince(iso: string | null): number | null {
 function fmtDate(iso: string | null): string {
   if (!iso) return '—'
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[1]}/${m[2]}/${m[3]}` : iso
+  return m ? `${m[2]}/${m[3]}` : iso
 }
 
 function pct(v: number | null): string {
@@ -100,52 +100,81 @@ export default function VocabPage() {
         {loading ? (
           <p className="py-10 text-center text-sm text-gray-500">読み込み中...</p>
         ) : students.length === 0 ? (
-          <p className="py-10 text-center text-sm text-gray-500">生徒がいません。</p>
+          <p className="py-10 text-center text-sm text-gray-500">
+            「生徒」タグが付いた友だちがいません。
+          </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs text-gray-500">
-                  <th className="px-4 py-3 font-medium">生徒</th>
-                  <th className="px-4 py-3 font-medium">最終実施</th>
-                  <th className="px-4 py-3 text-right font-medium">実施回数</th>
-                  <th className="px-4 py-3 text-right font-medium">直近正答率</th>
-                  <th className="px-4 py-3 text-right font-medium">解答数</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map((s) => {
-                  const d = daysSince(s.last_played_at)
-                  const stale = d === null || d >= STALE_DAYS
-                  return (
-                    <tr
-                      key={s.friend_id}
-                      className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 ${
-                        stale ? 'text-gray-400' : 'text-gray-700'
-                      }`}
-                    >
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => setSelected(s)}
-                          className="font-medium text-gray-900 hover:underline"
-                        >
-                          {s.display_name || '(名前なし)'}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 tabular-nums">
-                        {fmtDate(s.last_played_at)}
-                        {d !== null && d >= STALE_DAYS && (
-                          <span className="ml-2 text-xs">{d}日前</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{s.sessions}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{pct(s.latest_rate)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{s.answers}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            {students.map((s) => {
+              const d = daysSince(s.last_played_at)
+              const stale = d === null || d >= STALE_DAYS
+              const w1 = s.total ? (s.mastered / s.total) * 100 : 0
+              const w2 = s.total ? (s.unmastered / s.total) * 100 : 0
+              return (
+                <button
+                  key={s.friend_id}
+                  onClick={() => setSelected(s)}
+                  className="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left transition hover:border-gray-300 hover:shadow-sm"
+                >
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="text-base font-semibold text-gray-900">
+                      {s.display_name || '(名前なし)'}
+                    </span>
+                    {s.book_name && <span className="text-xs text-gray-500">{s.book_name}</span>}
+                    <span className={`ml-auto text-xs ${stale ? 'text-gray-400' : 'text-gray-500'}`}>
+                      最終実施 {fmtDate(s.last_played_at)}
+                      {d !== null && d >= STALE_DAYS && <span className="ml-1">（{d}日前）</span>}
+                      {d === null && <span className="ml-1">（未実施）</span>}
+                    </span>
+                  </div>
+
+                  {s.sessions === 0 ? (
+                    <p className="mt-3 text-sm text-gray-400">まだテストを実施していません。</p>
+                  ) : (
+                    <>
+                      <div className="mt-3 flex items-center gap-3">
+                        <span className="w-12 flex-none text-right text-lg font-bold tabular-nums text-gray-900">
+                          {pct(s.rate)}
+                        </span>
+                        <span className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                          <span className="block h-full bg-emerald-500" style={{ width: `${w1.toFixed(1)}%` }} />
+                          <span className="block h-full bg-red-400" style={{ width: `${w2.toFixed(1)}%` }} />
+                        </span>
+                        <span className="w-28 flex-none text-right text-xs tabular-nums text-gray-500">
+                          {s.mastered}/{s.total} 語
+                        </span>
+                      </div>
+
+                      <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
+                        <span>
+                          復習が必要{' '}
+                          <b className={`tabular-nums ${s.unmastered > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                            {s.unmastered}
+                          </b>{' '}
+                          語
+                        </span>
+                        <span>
+                          未挑戦 <b className="tabular-nums text-gray-900">{s.untried}</b> 語
+                        </span>
+                        <span>
+                          直近の正答率 <b className="tabular-nums text-gray-900">{pct(s.latest_rate)}</b>
+                        </span>
+                        <span>
+                          実施 <b className="tabular-nums text-gray-900">{s.sessions}</b> 回
+                        </span>
+                        <span>
+                          解答 <b className="tabular-nums text-gray-900">{s.answers}</b> 問
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+                  <p className="mt-3 text-xs text-blue-600">
+                    クリックすると、テスト履歴・何で間違えているか・復習が必要な単語の一覧が開きます →
+                  </p>
+                </button>
+              )
+            })}
           </div>
         )}
 

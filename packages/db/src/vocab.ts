@@ -815,6 +815,13 @@ export interface VocabStudentRow {
   sessions: number;
   answers: number;
   latest_rate: number | null;
+  /** 主に使っている単語帳での状態。一覧の時点で「あと何語あるか」まで見せる。 */
+  book_name: string | null;
+  total: number;
+  mastered: number;
+  unmastered: number;
+  untried: number;
+  rate: number | null;
 }
 
 /**
@@ -862,9 +869,36 @@ export async function getVocabStudents(
       )
       .bind(r.friend_id)
       .first<{ total: number; correct: number }>();
+
+    // 一覧の時点で習得率まで出す。名前と実施回数だけでは、誰に声をかけるべきかが分からない。
+    // 対象の単語帳は、本人が選んだもの → 無ければ直近に解いたもの。
+    const selected = await getSelectedBookId(db, r.friend_id);
+    const played = await db
+      .prepare(
+        `SELECT book_id FROM vocab_sessions WHERE friend_id = ?
+         ORDER BY finished_at DESC, id DESC LIMIT 1`,
+      )
+      .bind(r.friend_id)
+      .first<{ book_id: number }>();
+    const focusId = selected ?? played?.book_id ?? null;
+
+    let bookName: string | null = null;
+    let mastery: Mastery = { total: 0, mastered: 0, unmastered: 0, untried: 0, rate: 0 };
+    if (focusId) {
+      const b = await getVocabBookById(db, focusId);
+      bookName = b?.name ?? null;
+      mastery = await getMastery(db, r.friend_id, focusId);
+    }
+
     out.push({
       ...r,
       latest_rate: latest && latest.total > 0 ? latest.correct / latest.total : null,
+      book_name: bookName,
+      total: mastery.total,
+      mastered: mastery.mastered,
+      unmastered: mastery.unmastered,
+      untried: mastery.untried,
+      rate: focusId ? mastery.rate : null,
     });
   }
   return out;
