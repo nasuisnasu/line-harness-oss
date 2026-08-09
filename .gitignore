@@ -15,3 +15,7 @@ apps/web/out/
 docs/superpowers/
 apps/liff/dist/
 .vercel
+
+# wrangler のローカル環境変数（秘密が入るのでコミットしない）
+.dev.vars
+.dev.vars.*

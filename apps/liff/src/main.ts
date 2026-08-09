@@ -20,6 +20,8 @@ import { initEventBooking } from './event-booking.js';
 import { initSendTemplate } from './send-template.js';
 import { initEijaku } from './eijaku.js';
 import { initSchedule } from './schedule.js';
+import { initVocab } from './vocab.js';
+import { initMaterials } from './materials.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -408,6 +410,10 @@ async function main() {
       const params = new URLSearchParams(window.location.search);
       const formId = params.get('id');
       await initEijaku(formId);
+    } else if (page === 'vocab') {
+      await initVocab();
+    } else if (page === 'materials') {
+      await initMaterials();
     } else if (page === 'schedule') {
       const lineAccountId = _snapshotParam('lineAccountId');
       await initSchedule(lineAccountId);

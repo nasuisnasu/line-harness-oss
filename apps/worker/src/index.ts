@@ -41,6 +41,8 @@ import { events as eventsRoute } from './routes/events.js';
 import { kpi } from './routes/kpi.js';
 import { businessCalendar } from './routes/business-calendar.js';
 import { pay } from './routes/pay.js';
+import { vocab } from './routes/vocab.js';
+import { eijakuMaterials } from './routes/eijaku-materials.js';
 
 export type Env = {
   Bindings: {
@@ -58,6 +60,13 @@ export type Env = {
     GOOGLE_SA_JSON?: string;
     UNIVAPAY_WEBHOOK_SECRET?: string;
     PAY_DISCORD_WEBHOOK_URL?: string;  // 課金通知の専用Discord（未設定ならDISCORD_WEBHOOK_URLにフォールバック）
+    // 単語テスト（受講生専用）。3つとも設定されていないとゲートが fail closed で全部 503 になる
+    VOCAB_LOGIN_CHANNEL_ID?: string;   // 受講生専用OAの LINE Login チャネルID
+    VOCAB_LINE_ACCOUNT_ID?: string;    // 受講生専用OAの line_accounts.id
+    VOCAB_ALLOW_TAG_ID?: string;       // 受講生タグの tags.id
+    // 授業教材の受け取り。eijakuniki.com 側の棚（ワーカー eijaku-ai）を呼ぶ
+    SHELF_API_URL?: string;            // 例: https://eijaku-ai.<sub>.workers.dev
+    SHELF_API_KEY?: string;            // 棚と共有する鍵
   };
 };
 
@@ -104,6 +113,8 @@ app.route('/', eventsRoute);
 app.route('/', kpi);
 app.route('/', businessCalendar);
 app.route('/', pay);
+app.route('/', vocab);
+app.route('/', eijakuMaterials);
 
 // 404 fallback
 app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));

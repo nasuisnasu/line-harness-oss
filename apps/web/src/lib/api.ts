@@ -194,6 +194,33 @@ export const api = {
         body: JSON.stringify({ orderedIds }),
       }),
   },
+  /**
+   * 単語テスト（受講生専用）。
+   * 一覧は必ず `{ lineAccountId: selectedAccount.id }` を渡すこと。
+   * 渡さないと複数OAの生徒が混ざる。
+   */
+  vocab: {
+    students: (params: { lineAccountId?: string; tagId?: string }) => {
+      const q = new URLSearchParams()
+      if (params.lineAccountId) q.set('lineAccountId', params.lineAccountId)
+      if (params.tagId) q.set('tagId', params.tagId)
+      return fetchApi<{ success: boolean; students: VocabStudentRow[] }>(
+        '/api/vocab/admin/students?' + q.toString()
+      )
+    },
+    student: (friendId: string) =>
+      fetchApi<{ success: boolean } & VocabStudentDetail>(
+        '/api/vocab/admin/students/' + friendId
+      ),
+    sessionAnswers: (sessionId: number) =>
+      fetchApi<{ success: boolean; answers: VocabAnswerRow[] }>(
+        '/api/vocab/admin/sessions/' + sessionId + '/answers'
+      ),
+    books: (lineAccountId?: string) =>
+      fetchApi<{ success: boolean; books: { id: number; name: string; count: number }[] }>(
+        '/api/vocab/admin/books' + (lineAccountId ? '?lineAccountId=' + lineAccountId : '')
+      ),
+  },
   businessCalendar: {
     get: (lineAccountId: string) =>
       fetchApi<ApiResponse<BusinessCalendar>>(
@@ -1146,4 +1173,68 @@ export interface BulkActionItem {
   errorLog: string | null
   executedAt: string | null
   createdAt: string
+}
+
+// ── 単語テスト ───────────────────────────────────────────────────────────────
+
+export type VocabStudentRow = {
+  friend_id: string
+  display_name: string | null
+  last_played_at: string | null
+  sessions: number
+  answers: number
+  latest_rate: number | null
+}
+
+export type VocabBookMastery = {
+  id: number
+  name: string
+  total: number
+  mastered: number
+  unmastered: number
+  untried: number
+  rate: number
+  review_count: number
+  last_played_at: string | null
+}
+
+export type VocabSessionRow = {
+  id: number
+  book_name: string
+  kind: string
+  range_from: number | null
+  range_to: number | null
+  format: string
+  direction: string
+  timer_sec: number
+  started_at: string
+  finished_at: string
+  total: number
+  correct: number
+}
+
+export type VocabWeakWord = {
+  word_id: number
+  no: number
+  en: string
+  ja: string
+  wrong: number
+  asked: number
+}
+
+export type VocabAnswerRow = {
+  word_id: number
+  no: number
+  en: string
+  ja: string
+  ok: number
+  timed_out: number
+  elapsed_ms: number | null
+}
+
+export type VocabStudentDetail = {
+  sessions: VocabSessionRow[]
+  books: VocabBookMastery[]
+  weak_words: VocabWeakWord[]
+  totals: { answers: number; sessions: number; days: number }
 }
