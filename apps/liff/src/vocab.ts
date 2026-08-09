@@ -88,15 +88,20 @@ type Kind = 'normal' | 'review' | 'retry';
 
 /** 範囲は100語ブロック単位でしか選ばせない。キリ番以外を使う場面が無いため。 */
 const BLOCK = 100;
+/** 1回のテストで出せる上限。サーバーの MAX_WORDS_PER_REQUEST と揃えること。 */
+const MAX_QUESTIONS = 500;
 
 const cfg = {
   bookId: 0,
   from: 1,
   to: 100,
   lim: 20,
+  /** 出題数「全部」。範囲内の全単語を出す（サーバー上限まで）。 */
+  limAll: false,
   fmt: 'choice' as 'choice' | 'recall',
   dir: 'ej' as 'ej' | 'je',
-  ord: 'seq' as 'seq' | 'rnd',
+  /** 既定はランダム。番号順だと毎回おなじ並びで、順番で覚えてしまう。 */
+  ord: 'rnd' as 'seq' | 'rnd',
   tmr: 0,
 };
 
@@ -287,7 +292,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   color:var(--fg);line-height:1.1;letter-spacing:-.03em}
 .v-lead .n em{font-style:normal;font-size:14px;color:var(--fg2);margin-left:4px}
 
-.v-spark{display:block;width:100%;height:52px;margin:8px 0 4px}
+.v-spark{display:block;width:100%;height:118px;margin:8px 0 4px}
 .v-stats{display:flex;gap:10px;flex-wrap:wrap}
 .v-stat{flex:1;min-width:92px;border:1px solid var(--line);background:var(--surface);
   border-radius:var(--r);padding:13px 14px}
@@ -458,19 +463,59 @@ function renderError(msg: string, retry = true): void {
 
 // ── ホーム ──────────────────────────────────────────────────────────────────
 
-function sparkline(rates: number[]): string {
-  if (rates.length < 2) return '';
-  const w = 300;
-  const h = 52;
-  const pad = 4;
-  const step = (w - pad * 2) / (rates.length - 1);
-  const pts = rates.map((r, i) => [pad + i * step, h - pad - r * (h - pad * 2)]);
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-  const last = pts[pts.length - 1];
-  return `<svg class="v-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+/**
+ * 正答率の推移。
+ *
+ * **目盛りを必ず描く。** 軸の無い折れ線は上下しか読めず、60%なのか90%なのかが
+ * 分からないので意味がない。縦は0〜100%固定にする（データに合わせて伸縮させない）。
+ */
+function sparkline(points: { rate: number; at: string; kind: string }[]): string {
+  if (points.length < 2) return '';
+  const W = 320;
+  const H = 118;
+  const L = 30;
+  const R = 8;
+  const T = 8;
+  const B = 22;
+  const iw = W - L - R;
+  const ih = H - T - B;
+  const x = (i: number) => L + (iw * i) / (points.length - 1);
+  const y = (v: number) => T + ih * (1 - v);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.rate).toFixed(1)}`).join(' ');
+  const shortDate = (iso: string) => {
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${Number(m[2])}/${Number(m[3])}` : '';
+  };
+
+  const grid = [0, 0.5, 1]
+    .map(
+      (v) =>
+        `<line x1="${L}" y1="${y(v).toFixed(1)}" x2="${W - R}" y2="${y(v).toFixed(1)}"
+           stroke="var(--line2)" stroke-width="1"${v === 0.5 ? ' stroke-dasharray="3 3"' : ''}/>
+         <text x="${L - 5}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
+           fill="var(--fg3)" font-size="10" font-family="JetBrains Mono, monospace">${v * 100}</text>`,
+    )
+    .join('');
+
+  const dots = points
+    .map(
+      (p, i) =>
+        `<circle cx="${x(i).toFixed(1)}" cy="${y(p.rate).toFixed(1)}" r="${
+          p.kind === 'normal' ? 3.5 : 3
+        }" fill="${p.kind === 'normal' ? 'var(--accent)' : 'var(--surface)'}"
+         stroke="var(--accent)" stroke-width="1.5"/>`,
+    )
+    .join('');
+
+  return `<svg class="v-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="正答率の推移">
+    ${grid}
     <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"
-          stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.5" fill="var(--accent)"/>
+          stroke-linecap="round" stroke-linejoin="round"/>
+    ${dots}
+    <text x="${L}" y="${H - 6}" fill="var(--fg3)" font-size="10"
+      font-family="JetBrains Mono, monospace">${shortDate(points[0].at)}</text>
+    <text x="${W - R}" y="${H - 6}" text-anchor="end" fill="var(--fg3)" font-size="10"
+      font-family="JetBrains Mono, monospace">${shortDate(points[points.length - 1].at)}</text>
   </svg>`;
 }
 
@@ -491,7 +536,7 @@ function masteryCard(b: DashboardBook): string {
     <span class="k3"><i></i>未挑戦 <b>${b.untried}</b></span>
   </div>
   <p class="v-note">
-    テストで間違えた語は「復習が必要」に入ります。次のテストで正解すると「習得済み」に移ります。
+    テストで間違えた単語は「復習が必要」に入ります。次のテストで正解すると「習得済み」に移ります。
   </p>
 </div>`;
 }
@@ -548,6 +593,7 @@ function resetRangeForBook(): void {
   if (cfg.to > max) cfg.to = Math.ceil(max / BLOCK) * BLOCK;
   cfg.to = Math.min(cfg.to, Math.ceil(max / BLOCK) * BLOCK);
   cfg.lim = 20;
+  cfg.limAll = false;
 }
 
 // ── ホーム ──────────────────────────────────────────────────────────────────
@@ -592,18 +638,18 @@ async function showHome(): Promise<void> {
   const hasHistory = d.totals.sessions > 0;
 
   const reviewBlock = book.unmastered
-    ? `<button class="v-go" id="vReview">復習が必要な語を解く</button>
+    ? `<button class="v-go" id="vReview">復習が必要な単語を解く</button>
        <p class="v-note" style="margin:8px 0 0;text-align:center">
          ${book.unmastered}語のうち、番号の若い順に${Math.min(book.unmastered, 20)}語
        </p>`
     : hasHistory
-      ? '<p class="v-note" style="text-align:center">復習が必要な語はいまありません。</p>'
+      ? '<p class="v-note" style="text-align:center">復習が必要な単語はまだありません。</p>'
       : '';
 
   const trendBlock = d.recent.enough
     ? `<div class="v-card">
          <span class="lg">最近の正答率</span>
-         ${sparkline(d.recent.sessions.map((s) => s.rate))}
+         ${sparkline(d.recent.sessions)}
          <div class="v-mlegend">直近 ${d.recent.sessions.length} 回　最新 ${
            d.recent.latest_rate === null ? '—' : pct(d.recent.latest_rate)
          }</div>
@@ -615,7 +661,7 @@ async function showHome(): Promise<void> {
 
   const weakBlock = d.weak_words.length
     ? `<div class="v-list">
-         <h3>くり返し間違えている語</h3>
+         <h3>くり返し間違えている単語</h3>
          <ul>${d.weak_words
            .map(
              (w) => `<li><span class="n">${no3(w.no)}</span><span class="e">${esc(w.en)}<span class="x">×${
@@ -711,7 +757,10 @@ function renderSetup(): void {
 <div class="v-card">
   <span class="lg">出題数</span>
   <div class="v-row">
-    ${[10, 20, 30, 50].map((n) => chip('lim', String(n), `${n}問`, cfg.lim === n)).join('')}
+    ${[10, 20, 30, 50, 100]
+      .map((n) => chip('lim', String(n), `${n}問`, !cfg.limAll && cfg.lim === n))
+      .join('')}
+    ${chip('lim', 'all', '全部', cfg.limAll)}
   </div>
 </div>
 
@@ -752,8 +801,11 @@ function renderSetup(): void {
     cfg.from = fromBlk * BLOCK + 1;
     cfg.to = Math.min((toBlk + 1) * BLOCK, book.max_no);
     const span = cfg.to - cfg.from + 1;
+    // 「全部」は範囲内の全単語。1回のテストとして現実的な上限（サーバーと同じ500）で頭打ちにする。
+    if (cfg.limAll) cfg.lim = Math.min(span, MAX_QUESTIONS);
+    const shown = Math.min(cfg.lim, span);
     document.getElementById('vRngLabel')!.textContent = `${cfg.from} 〜 ${cfg.to}`;
-    document.getElementById('vRngCount')!.textContent = `この範囲に ${span} 語（${cfg.lim}問を出題）`;
+    document.getElementById('vRngCount')!.textContent = `この範囲に ${span} 語（${shown}問を出題）`;
   };
 
   fromSl.oninput = () => {
@@ -790,7 +842,10 @@ function renderSetup(): void {
       document.querySelectorAll<HTMLElement>(`.v-chip[data-g="${g}"]`).forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       if (g === 'tmr') cfg.tmr = Number(b.dataset.v);
-      else if (g === 'lim') cfg.lim = Number(b.dataset.v);
+      else if (g === 'lim') {
+        cfg.limAll = b.dataset.v === 'all';
+        if (!cfg.limAll) cfg.lim = Number(b.dataset.v);
+      }
       else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
       else if (g === 'dir') cfg.dir = b.dataset.v as 'ej' | 'je';
       else if (g === 'ord') cfg.ord = b.dataset.v as 'seq' | 'rnd';
@@ -821,7 +876,7 @@ async function startNormal(): Promise<void> {
       `/api/vocab/words?book_id=${cfg.bookId}&from=${cfg.from}&to=${cfg.to}&limit=${cfg.lim}&order=${cfg.ord}`,
     );
     if (!res.words.length) {
-      say('その範囲に語がありません。');
+      say('その範囲に単語がありません。');
       if (btn) btn.disabled = false;
       return;
     }
@@ -1124,11 +1179,11 @@ ${listBlock('できなかった（復習が必要に入りました）', ng, fal
 ${listBlock('できた', ok, true)}
 <p class="v-hint" style="margin:0 0 8px">コピーは単語帳の番号順に並びます。</p>
 <div class="v-cp">
-  <button id="vCp1">できなかった語</button>
-  <button id="vCp2">できた語</button>
+  <button id="vCp1">できなかった単語</button>
+  <button id="vCp2">できた単語</button>
   <button id="vCp3">結果を全部</button>
 </div>
-${ng.length ? '<button class="v-go" id="vAgain">できなかった語だけ、もう一度</button>' : ''}
+${ng.length ? '<button class="v-go" id="vAgain">できなかった単語だけ、もう一度</button>' : ''}
 <button class="v-ghost" id="vHome">ホームに戻る</button>`;
 
   app().innerHTML = shell('', '', body);
@@ -1264,7 +1319,7 @@ async function showRecords(): Promise<void> {
     </div>`;
 
   const weak = rec.weak_words.length
-    ? `<div class="v-list"><h3>くり返し間違えている語</h3>
+    ? `<div class="v-list"><h3>くり返し間違えている単語</h3>
          <ul>${rec.weak_words
            .map(
              (w) =>

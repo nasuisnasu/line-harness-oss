@@ -21,3 +21,9 @@ bucket_name = "line-crm-uploads"
 
 [triggers]
 crons = ["* * * * *"]
+
+# 授業教材の棚（eijaku-ai）を直接呼ぶための結線。
+# 同じ workers.dev ゾーンのWorker同士を fetch で呼ぶと Cloudflare の 1042 で弾かれる。
+[[services]]
+binding = "SHELF"
+service = "eijaku-ai"

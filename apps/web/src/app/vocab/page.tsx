@@ -11,7 +11,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { api, type VocabStudentRow } from '@/lib/api'
 import Header from '@/components/layout/header'
 import { useAccount } from '@/lib/account-context'
-import VocabStudentDetail from './student-detail'
+import VocabStudentDetailPanel from './student-detail'
 
 /** これ以上実施がない生徒は行を薄くする（色は足さない）。 */
 const STALE_DAYS = 7
@@ -68,7 +68,7 @@ export default function VocabPage() {
       <Header title="単語テスト" />
       <div className="p-6">
         {selected ? (
-          <VocabStudentDetail
+          <VocabStudentDetailPanel
             friendId={selected.friend_id}
             displayName={selected.display_name}
             onBack={() => setSelected(null)}

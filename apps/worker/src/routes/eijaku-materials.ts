@@ -95,17 +95,19 @@ eijakuMaterials.get('/api/eijaku/materials', async (c) => {
     return c.json(d.body, d.status);
   }
 
-  const base = c.env.SHELF_API_URL;
   const key = c.env.SHELF_API_KEY;
-  if (!base || !key) {
-    console.error('[eijaku-materials] SHELF_API_URL / SHELF_API_KEY が未設定です');
+  // ファイルを開くURLは生徒のブラウザが直接叩くので、公開URLが要る
+  const base = c.env.SHELF_PUBLIC_URL;
+  if (!c.env.SHELF || !key || !base) {
+    console.error('[eijaku-materials] SHELF / SHELF_API_KEY / SHELF_PUBLIC_URL が未設定です');
     return c.json({ success: false, error: 'サーバーの設定が完了していません' }, 503);
   }
 
-  const url =
-    `${base}/shelf/for-line/${encodeURIComponent(gate.friend.line_user_id)}` +
+  // 呼び出しはサービスバインディング経由（同ゾーンのWorkerをURLで呼ぶと 1042 になる）
+  const path =
+    `/shelf/for-line/${encodeURIComponent(gate.friend.line_user_id)}` +
     `?name=${encodeURIComponent(gate.friend.display_name || '')}`;
-  const r = await fetch(url, { headers: { 'X-Shelf-Key': key } });
+  const r = await c.env.SHELF.fetch(`https://shelf${path}`, { headers: { 'X-Shelf-Key': key } });
   if (!r.ok) {
     console.error(`[eijaku-materials] 棚から取得できませんでした: ${r.status}`);
     return c.json({ success: false, error: '教材を取得できませんでした' }, 502);

@@ -65,7 +65,8 @@ export type Env = {
     VOCAB_LINE_ACCOUNT_ID?: string;    // 受講生専用OAの line_accounts.id
     VOCAB_ALLOW_TAG_ID?: string;       // 受講生タグの tags.id
     // 授業教材の受け取り。eijakuniki.com 側の棚（ワーカー eijaku-ai）を呼ぶ
-    SHELF_API_URL?: string;            // 例: https://eijaku-ai.<sub>.workers.dev
+    SHELF?: Fetcher;                   // 棚へのサービスバインディング（1042回避のためURLでは呼ばない）
+    SHELF_PUBLIC_URL?: string;         // 生徒に見せるファイルの公開URL（例: https://eijaku-ai.<sub>.workers.dev）
     SHELF_API_KEY?: string;            // 棚と共有する鍵
   };
 };

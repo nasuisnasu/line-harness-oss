@@ -34,8 +34,14 @@ import type { Env } from '../index.js';
 
 export const vocab = new Hono<Env>();
 
-/** 1リクエストで返す語数の上限。全件取得の経路を作らないための線引き。 */
-const MAX_WORDS_PER_REQUEST = 100;
+/**
+ * 1リクエストで返す語数の上限。
+ *
+ * 「範囲を指定せずに単語帳を丸ごと取る」経路を作らないための線引きであって、
+ * 受講生を縛るためのものではない（`10-access-control.md`）。
+ * 出題数に「全部」を入れたので、1回のテストとして現実的な上限まで広げてある。
+ */
+const MAX_WORDS_PER_REQUEST = 500;
 const MAX_REVIEW_WORDS = 20;
 
 // ── ゲート ──────────────────────────────────────────────────────────────────
@@ -304,7 +310,8 @@ vocab.get('/api/vocab/admin/students', async (c) => {
 
 vocab.get('/api/vocab/admin/students/:friendId', async (c) => {
   const friendId = c.req.param('friendId');
-  const detail = await getVocabStudentDetail(c.env.DB, friendId);
+  const bookId = Number(c.req.query('book_id')) || null;
+  const detail = await getVocabStudentDetail(c.env.DB, friendId, bookId);
   return c.json({ success: true, ...detail });
 });
 

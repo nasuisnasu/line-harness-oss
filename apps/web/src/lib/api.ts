@@ -208,9 +208,9 @@ export const api = {
         '/api/vocab/admin/students?' + q.toString()
       )
     },
-    student: (friendId: string) =>
+    student: (friendId: string, bookId?: number) =>
       fetchApi<{ success: boolean } & VocabStudentDetail>(
-        '/api/vocab/admin/students/' + friendId
+        '/api/vocab/admin/students/' + friendId + (bookId ? '?book_id=' + bookId : '')
       ),
     sessionAnswers: (sessionId: number) =>
       fetchApi<{ success: boolean; answers: VocabAnswerRow[] }>(
@@ -1232,9 +1232,47 @@ export type VocabAnswerRow = {
   elapsed_ms: number | null
 }
 
+export type VocabFormatStat = {
+  ej: number | null
+  je: number | null
+  choice: number | null
+  recall: number | null
+  timeout_rate: number | null
+}
+
+export type VocabSectionStat = {
+  block: number
+  from: number
+  to: number
+  asked: number
+  correct: number
+  rate: number
+}
+
+export type VocabWordRow = {
+  id: number
+  no: number
+  en: string
+  ja: string
+  section: string | null
+}
+
+export type VocabTrendPoint = {
+  at: string
+  rate: number
+  kind: string
+  total: number
+  correct: number
+}
+
 export type VocabStudentDetail = {
   sessions: VocabSessionRow[]
   books: VocabBookMastery[]
   weak_words: VocabWeakWord[]
   totals: { answers: number; sessions: number; days: number }
+  focus_book: { id: number; name: string } | null
+  formats: VocabFormatStat | null
+  sections: VocabSectionStat[]
+  review_words: VocabWordRow[]
+  trend: VocabTrendPoint[]
 }

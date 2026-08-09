@@ -723,9 +723,12 @@ export async function saveVocabSession(
   // answered_at はサーバーが打つ。クライアントの時計を信用すると、
   // 未来日時の解答が「直近の解答」として居座り続ける。
   const answeredAt = jstNow();
-  if (answers.length) {
+  // 「全部」で数百問になることがあるので、1回の batch に詰め込みすぎない。
+  const CHUNK = 50;
+  for (let i = 0; i < answers.length; i += CHUNK) {
+    const chunk = answers.slice(i, i + CHUNK);
     await db.batch(
-      answers.map((a) =>
+      chunk.map((a) =>
         db
           .prepare(
             `INSERT INTO vocab_answers
@@ -870,11 +873,22 @@ export async function getVocabStudents(
 export async function getVocabStudentDetail(
   db: D1Database,
   friendId: string,
+  bookId?: number | null,
 ): Promise<{
   sessions: (VocabSession & { book_name: string })[];
   books: DashboardBook[];
   weak_words: WeakWord[];
   totals: { answers: number; sessions: number; days: number };
+  /** 傾向の分析対象にした単語帳。生徒が複数使っていても、混ぜずに1冊ずつ見る。 */
+  focus_book: { id: number; name: string } | null;
+  /** 「何で間違えているか」。方向・形式・速度で切る。語の意味では切らない。 */
+  formats: FormatStat | null;
+  /** 単語帳内の10語ブロックごとの正答率。解答が少ないブロックは返らない。 */
+  sections: SectionStat[];
+  /** いま復習が必要な単語（直近の解答が不正解のもの）。番号順・全件。 */
+  review_words: VocabWord[];
+  /** 直近セッションの正答率の推移（古い→新しい）。 */
+  trend: { at: string; rate: number; kind: string; total: number; correct: number }[];
 }> {
   const sessions = await db
     .prepare(
@@ -892,11 +906,37 @@ export async function getVocabStudentDetail(
 
   const dash = await getVocabDashboard(db, friendId, friend?.line_account_id ?? null);
 
+  // 傾向を見る単語帳は、指定が無ければ「直近に解いたもの」。
+  // 複数の単語帳の解答を混ぜると、セクション別も形式別も意味を失う。
+  const focusId =
+    bookId && dash.books.some((b) => b.id === bookId)
+      ? bookId
+      : (dash.books.find((b) => b.last_played_at) ?? dash.books[0])?.id ?? null;
+  const focus = focusId ? dash.books.find((b) => b.id === focusId) ?? null : null;
+
+  const records = focusId ? await getVocabRecords(db, friendId, focusId) : null;
+
+  const trend = sessions.results
+    .slice(0, 20)
+    .map((x) => ({
+      at: x.finished_at,
+      kind: x.kind,
+      total: x.total,
+      correct: x.correct,
+      rate: x.total > 0 ? x.correct / x.total : 0,
+    }))
+    .reverse();
+
   return {
     sessions: sessions.results,
     books: dash.books,
-    weak_words: await getWeakWords(db, friendId, null, 200),
+    weak_words: await getWeakWords(db, friendId, focusId ?? null, 200),
     totals: dash.totals,
+    focus_book: focus ? { id: focus.id, name: focus.name } : null,
+    formats: records ? records.formats : null,
+    sections: records ? records.sections : [],
+    review_words: focusId ? await getReviewWords(db, friendId, focusId, 500) : [],
+    trend,
   };
 }
 
