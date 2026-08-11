@@ -14,8 +14,10 @@ import {
   getVocabBooks,
   getVocabBookById,
   getVocabWords,
+  getSectionTestWords,
   getVocabDecoys,
   getReviewWords,
+  getCheckupWords,
   getVocabDashboard,
   getVocabRecords,
   saveVocabSession,
@@ -43,6 +45,8 @@ export const vocab = new Hono<Env>();
  */
 const MAX_WORDS_PER_REQUEST = 500;
 const MAX_REVIEW_WORDS = 20;
+/** 実力テストで選べる問題数。多いほど点が安定する（20問は±9点、50問は±6点）。 */
+const CHECKUP_SIZES = [20, 30, 50];
 
 // ── ゲート ──────────────────────────────────────────────────────────────────
 
@@ -158,21 +162,20 @@ vocab.get('/api/vocab/words', async (c) => {
     return c.json({ success: false, error: `1回に取得できるのは${MAX_WORDS_PER_REQUEST}語までです` }, 400);
   }
 
-  const words = await getVocabWords(c.env.DB, bookId, from, to, limit, order);
+  // 状態（未挑戦／復習が必要／習得済み）を見て枠を配る。毎回ランダムに引くと
+  // 2回目以降がただの引き直しになり、セクションが埋まらない。
+  const words = await getSectionTestWords(c.env.DB, gate.friend.id, bookId, from, to, limit);
   if (!words.length) {
     return c.json({ success: true, words: [], decoys: [] });
   }
 
-  // 4択のダミーは、出題語が4語未満のときだけ範囲外から補う。
-  const need = Math.max(0, 4 - words.length);
-  const decoys = need
-    ? await getVocabDecoys(
-        c.env.DB,
-        bookId,
-        words.map((w) => w.id),
-        need + 2,
-      )
-    : [];
+  // 4択のダミー。出題語だけで作ると選択肢が足りない場面があるので、必ず補充分を渡す。
+  const decoys = await getVocabDecoys(
+    c.env.DB,
+    bookId,
+    words.map((w) => w.id),
+    8,
+  );
 
   return c.json({ success: true, words, decoys });
 });
@@ -206,7 +209,49 @@ vocab.get('/api/vocab/review', async (c) => {
 
   const limit = Math.min(Number(c.req.query('limit') || MAX_REVIEW_WORDS), MAX_REVIEW_WORDS);
   const words = await getReviewWords(c.env.DB, gate.friend.id, bookId, limit);
-  return c.json({ success: true, count: words.length, words });
+
+  // 復習語が3語以下だと、出題語だけでは4択の選択肢が埋まらない（1語なら答えが自明になる）。
+  // ダミーは必ずサーバーで用意する。
+  const decoys = words.length
+    ? await getVocabDecoys(
+        c.env.DB,
+        bookId,
+        words.map((w) => w.id),
+        8,
+      )
+    : [];
+  return c.json({ success: true, count: words.length, words, decoys });
+});
+
+/**
+ * 今日の定着テスト。単語帳の全範囲からランダムに20問。
+ *
+ * 範囲を絞らないので `MAX_WORDS_PER_REQUEST` の範囲チェックは通らない。
+ * ここは語数を20に固定することで「全件取得の経路を作らない」線引きを守る。
+ */
+vocab.get('/api/vocab/checkup', async (c) => {
+  const gate = await requireStudent(c);
+  if (!gate.ok) {
+    const d = denied(gate.status);
+    return c.json(d.body, d.status);
+  }
+  const bookId = Number(c.req.query('book_id'));
+  if (!bookId) return c.json({ success: false, error: 'book_id は必須です' }, 400);
+
+  const size = CHECKUP_SIZES.includes(Number(c.req.query('size')))
+    ? Number(c.req.query('size'))
+    : CHECKUP_SIZES[0];
+  const words = await getCheckupWords(c.env.DB, bookId, size);
+  if (!words.length) return c.json({ success: true, words: [], decoys: [] });
+
+  // 全範囲から散らばって出るので、4択のダミーは必ずサーバー側で用意する
+  const decoys = await getVocabDecoys(
+    c.env.DB,
+    bookId,
+    words.map((w) => w.id),
+    12,
+  );
+  return c.json({ success: true, words, decoys });
 });
 
 vocab.get('/api/vocab/dashboard', async (c) => {
@@ -264,7 +309,9 @@ vocab.post('/api/vocab/sessions', async (c) => {
   const book = await getVocabBookById(c.env.DB, body.book_id);
   if (!book) return c.json({ success: false, error: '単語帳が見つかりません' }, 404);
 
-  const kind = ['normal', 'review', 'retry'].includes(body.kind || '') ? (body.kind as string) : 'normal';
+  const kind = ['normal', 'review', 'retry', 'checkup'].includes(body.kind || '')
+    ? (body.kind as string)
+    : 'normal';
   const format = body.format === 'recall' ? 'recall' : 'choice';
   const direction = body.direction === 'je' ? 'je' : 'ej';
   const orderMode = body.order_mode === 'rnd' ? 'rnd' : 'seq';

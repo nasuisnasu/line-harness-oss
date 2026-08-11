@@ -22,6 +22,7 @@ import {
   type VocabStudentDetail,
   type VocabAnswerRow,
   type VocabTrendPoint,
+  type VocabCheckup,
 } from '@/lib/api'
 
 function fmtDateTime(iso: string): string {
@@ -29,7 +30,8 @@ function fmtDateTime(iso: string): string {
   return m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : iso
 }
 
-const kindLabel = (k: string) => (k === 'review' ? '復習' : k === 'retry' ? 'もう一度' : '通常')
+const kindLabel = (k: string) =>
+  k === 'checkup' ? '実力' : k === 'review' ? '復習' : k === 'retry' ? 'もう一度' : 'セクション'
 const fmtLabel = (f: string) => (f === 'recall' ? '自己採点' : '4択')
 const dirLabel = (d: string) => (d === 'je' ? '日→英' : '英→日')
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`)
@@ -105,6 +107,63 @@ function Trend({ points }: { points: VocabTrendPoint[] }) {
       </svg>
       <p className="mt-1 text-xs text-gray-400">
         ● 通常のテスト　○ 復習・もう一度（正答率が上がりやすいので分けています）
+      </p>
+    </div>
+  )
+}
+
+/** 実力テストの推移。全範囲・4択・5秒の固定条件で測った点なので、回をまたいで比較できる。 */
+function CheckupTrend({ points }: { points: VocabCheckup[] }) {
+  if (points.length < 2) {
+    return (
+      <p className="text-sm text-gray-500">
+        推移を出すにはあと{2 - points.length}回必要です。
+      </p>
+    )
+  }
+  const W = 680, H = 190, L = 38, R = 12, T = 12, B = 30
+  const iw = W - L - R, ih = H - T - B
+  const x = (i: number) => L + (iw * i) / (points.length - 1)
+  const y = (v: number) => T + ih * (1 - v)
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(' ')
+  const short = (iso: string) => {
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    return m ? `${Number(m[2])}/${Number(m[3])}` : ''
+  }
+  const every = Math.max(1, Math.ceil(points.length / 6))
+  return (
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-48 w-full min-w-[420px]" role="img" aria-label="実力テストの推移">
+        {[0, 0.25, 0.5, 0.75, 1].map((v) => (
+          <g key={v}>
+            <line x1={L} y1={y(v)} x2={W - R} y2={y(v)} stroke="currentColor"
+              className={v === 0 || v === 1 ? 'text-gray-300' : 'text-gray-200'}
+              strokeWidth={1} strokeDasharray={v === 0 || v === 1 ? undefined : '3 3'} />
+            <text x={L - 6} y={y(v) + 4} textAnchor="end" className="fill-gray-400" fontSize={11}>
+              {Math.round(v * 100)}%
+            </text>
+          </g>
+        ))}
+        {/* 4択なので何もしなくても25%は当たる。その下は実質ありえない */}
+        <line x1={L} y1={y(0.25)} x2={W - R} y2={y(0.25)} stroke="currentColor"
+          className="text-amber-300" strokeWidth={1.5} strokeDasharray="5 4" />
+        <path d={d} fill="none" stroke="currentColor" className="text-emerald-500" strokeWidth={2}
+          strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((p, i) => (
+          <g key={i}>
+            <circle cx={x(i)} cy={y(p.score)} r={4} className="fill-emerald-600">
+              <title>{`${short(p.at)} ${Math.round(p.score * 100)}%（${p.correct}/${p.total}）`}</title>
+            </circle>
+            {i % every === 0 || i === points.length - 1 ? (
+              <text x={x(i)} y={H - 10} textAnchor="middle" className="fill-gray-400" fontSize={11}>
+                {short(p.at)}
+              </text>
+            ) : null}
+          </g>
+        ))}
+      </svg>
+      <p className="mt-1 text-xs text-gray-400">
+        黄色の破線は25%。4択なので、何も覚えていなくてもここまでは当たります。
       </p>
     </div>
   )
@@ -245,51 +304,62 @@ export default function VocabStudentDetailPanel({
               <div className="text-2xl font-bold tabular-nums">{data.totals.answers}</div>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white p-4">
-              <div className="text-xs text-gray-500">直近の正答率</div>
+              <div className="text-xs text-gray-500">実力テスト</div>
               <div className="text-2xl font-bold tabular-nums">
-                {pct(data.trend.length ? data.trend[data.trend.length - 1].rate : null)}
+                {pct(book?.checkup_score?.score ?? null)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {book?.checkup_score
+                  ? `直近${book.checkup_score.sessions}回の加重平均`
+                  : '未受験'}
               </div>
             </div>
           </div>
 
-          {/* ── 3. いま復習が必要な単語がどれくらいあるか ── */}
-          {book && (
+          {/* ── 実力テスト ── */}
+          <Section
+            title="実力テストの推移"
+            hint="全範囲から100語ごとに均等出題・4択・5秒固定。条件をそろえているので回をまたいで比較できます"
+          >
+            <CheckupTrend points={book?.checkups ?? []} />
+          </Section>
+
+          {/* ── セクション別の定着率 ── */}
+          {book && book.blocks?.length > 0 && (
             <Section
-              title="いまの状態"
-              hint={`${book.name}／直近のテストで正解した単語を「習得済み」、間違えた単語を「復習が必要」として数えています`}
+              title="セクション別の定着率"
+              hint="100語ごと。直近のテストで正解できている語の割合です。どこが手薄かはここで見ます"
             >
-              <div className="mb-2 flex items-baseline justify-between">
-                <span className="text-sm text-gray-600">習得率</span>
-                <span className="tabular-nums text-gray-900">
-                  <b className="text-xl">{pct(book.rate)}</b>{' '}
-                  <span className="text-xs text-gray-500">
-                    {book.mastered} / {book.total} 語
-                  </span>
-                </span>
-              </div>
-              <div className="flex h-2.5 overflow-hidden rounded-full bg-gray-100">
-                <span className="block h-full bg-emerald-500" style={{ width: `${(book.total ? (book.mastered / book.total) * 100 : 0).toFixed(1)}%` }} />
-                <span className="block h-full bg-red-400" style={{ width: `${(book.total ? (book.unmastered / book.total) * 100 : 0).toFixed(1)}%` }} />
-              </div>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
-                <span className="flex items-center gap-1.5">
-                  <i className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-                  習得済み <b className="tabular-nums text-gray-900">{book.mastered}</b>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <i className="inline-block h-2 w-2 rounded-full bg-red-400" />
-                  復習が必要 <b className="tabular-nums text-gray-900">{book.unmastered}</b>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <i className="inline-block h-2 w-2 rounded-full border border-gray-300" />
-                  未挑戦 <b className="tabular-nums text-gray-900">{book.untried}</b>
-                </span>
-              </div>
+              {book.blocks.map((b) => {
+                const rate = b.total ? b.mastered / b.total : 0
+                return (
+                  <div key={b.block} className="mb-2 flex items-center gap-3 last:mb-0">
+                    <span className="w-24 flex-none text-xs tabular-nums text-gray-500">
+                      {b.from}–{b.to}
+                    </span>
+                    <span className="flex h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+                      <span className="block h-full bg-emerald-500"
+                        style={{ width: `${(b.total ? (b.mastered / b.total) * 100 : 0).toFixed(1)}%` }} />
+                      <span className="block h-full bg-red-400"
+                        style={{ width: `${(b.total ? (b.unmastered / b.total) * 100 : 0).toFixed(1)}%` }} />
+                    </span>
+                    <span className="w-32 flex-none text-right text-xs tabular-nums text-gray-600">
+                      {pct(rate)}
+                      <span className="ml-1 text-gray-400">
+                        (復習{b.unmastered}/未挑戦{b.untried})
+                      </span>
+                    </span>
+                  </div>
+                )
+              })}
             </Section>
           )}
 
           {/* ── 2. 正答率の推移 ── */}
-          <Section title="正答率の推移" hint="直近20回。復習・もう一度の回は正答率が上がりやすいので、単独では読まないこと">
+          <Section
+            title="セクションテストの正答率"
+            hint="範囲を選んで解いた回。範囲も形式も毎回違うので、実力の比較には使えません。実力は上の実力テストで見てください"
+          >
             <Trend points={data.trend} />
           </Section>
 
@@ -323,7 +393,7 @@ export default function VocabStudentDetailPanel({
             {data.sections.length > 0 && (
               <div className="mt-5">
                 <h3 className="mb-2 text-xs font-semibold text-gray-500">
-                  範囲別の正答率（10語ごと・5回以上解答したブロックのみ）
+                  範囲別の正答率（100語ごと・10回以上解答したブロックのみ）
                 </h3>
                 {data.sections.map((sc) => (
                   <Bar key={sc.block} label={`${sc.from}–${sc.to}`} value={sc.rate} note={`(${sc.asked}回)`} />

@@ -132,45 +132,52 @@ export default function VocabPage() {
                     <p className="mt-3 text-sm text-gray-400">まだテストを実施していません。</p>
                   ) : (
                     <>
-                      <div className="mt-3 flex items-center gap-3">
-                        <span className="w-12 flex-none text-right text-lg font-bold tabular-nums text-gray-900">
-                          {pct(s.rate)}
-                        </span>
-                        <span className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100">
-                          <span className="block h-full bg-emerald-500" style={{ width: `${w1.toFixed(1)}%` }} />
-                          <span className="block h-full bg-red-400" style={{ width: `${w2.toFixed(1)}%` }} />
-                        </span>
-                        <span className="w-28 flex-none text-right text-xs tabular-nums text-gray-500">
-                          {s.mastered}/{s.total} 語
-                        </span>
+                      {/* 講師が最初に見る数字は実力テストのスコア。カバー率ではない */}
+                      <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                        <span className="text-xs text-gray-500">実力テスト</span>
+                        {s.checkup_score === null ? (
+                          <span className="text-sm text-gray-400">未受験</span>
+                        ) : (
+                          <>
+                            <b className="text-2xl tabular-nums text-gray-900">{pct(s.checkup_score)}</b>
+                            <span className="text-xs text-gray-500">
+                              直近{s.checkup_sessions}回の加重平均
+                            </span>
+                          </>
+                        )}
                       </div>
 
-                      <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
+                      <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-gray-100">
+                        <span className="block h-full bg-emerald-500" style={{ width: `${w1.toFixed(1)}%` }} />
+                        <span className="block h-full bg-red-400" style={{ width: `${w2.toFixed(1)}%` }} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
+                        <span>
+                          学習済み{' '}
+                          <b className="tabular-nums text-gray-900">{s.mastered + s.unmastered}</b>
+                          {' / '}
+                          <span className="tabular-nums">{s.total}</span> 語
+                        </span>
                         <span>
                           復習が必要{' '}
                           <b className={`tabular-nums ${s.unmastered > 0 ? 'text-red-600' : 'text-gray-900'}`}>
                             {s.unmastered}
-                          </b>{' '}
-                          語
+                          </b>
                         </span>
                         <span>
-                          未挑戦 <b className="tabular-nums text-gray-900">{s.untried}</b> 語
-                        </span>
-                        <span>
-                          直近の正答率 <b className="tabular-nums text-gray-900">{pct(s.latest_rate)}</b>
+                          直近のセクションテスト{' '}
+                          <b className="tabular-nums text-gray-900">{pct(s.latest_rate)}</b>
                         </span>
                         <span>
                           実施 <b className="tabular-nums text-gray-900">{s.sessions}</b> 回
-                        </span>
-                        <span>
-                          解答 <b className="tabular-nums text-gray-900">{s.answers}</b> 問
                         </span>
                       </div>
                     </>
                   )}
 
+
                   <p className="mt-3 text-xs text-blue-600">
-                    クリックすると、テスト履歴・何で間違えているか・復習が必要な単語の一覧が開きます →
+                    クリックすると、実力テストの推移・セクション別の定着率・何で間違えているかが開きます →
                   </p>
                 </button>
               )

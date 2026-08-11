@@ -1184,12 +1184,32 @@ export type VocabStudentRow = {
   sessions: number
   answers: number
   latest_rate: number | null
+  /** 実力テストのスコア（直近10回の加重平均）。未受験なら null */
+  checkup_score: number | null
+  checkup_sessions: number
   book_name: string | null
   total: number
   mastered: number
   unmastered: number
   untried: number
   rate: number | null
+}
+
+export type VocabBlock = {
+  block: number
+  from: number
+  to: number
+  total: number
+  mastered: number
+  unmastered: number
+  untried: number
+}
+
+export type VocabCheckup = {
+  at: string
+  total: number
+  correct: number
+  score: number
 }
 
 export type VocabBookMastery = {
@@ -1202,6 +1222,12 @@ export type VocabBookMastery = {
   rate: number
   review_count: number
   last_played_at: string | null
+  /** 100語ごとの状態。セクション別の定着率に使う */
+  blocks: VocabBlock[]
+  /** 実力テストの履歴（古い→新しい） */
+  checkups: VocabCheckup[]
+  /** 直近10回の加重平均 */
+  checkup_score: { score: number; correct: number; total: number; sessions: number } | null
 }
 
 export type VocabSessionRow = {

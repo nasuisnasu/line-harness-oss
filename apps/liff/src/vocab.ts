@@ -7,7 +7,11 @@
  * 出題まわりのロジックとデザインは vocab-test.html から移植している。
  *
  * 仕様の正本は `.company/英弱ニキ/lms/vocab/`。とくに次を守ること。
- *   - 習得率はホームの最上段（このツールを開く理由がそれなので）
+ *   - 数字は「実力テストのスコア」1本。セクションごとの定着率はテストタブの一覧で見せる
+ *   - テストは3種類。名前を混ぜないこと
+ *       実力テスト   … 全範囲からランダム20問。実力の指標（kind='checkup'）
+ *       セクションテスト … 範囲を選んで解く（kind='normal'）
+ *       復習テスト   … 間違えた語だけ（kind='review'）
  *   - データが足りないときは数字を出さない
  *   - 時間切れは不正解として送る
  *   - サーバーへの送信は結果画面で1回だけ
@@ -22,6 +26,9 @@ declare const liff: {
   isInClient(): boolean;
   closeWindow(): void;
 };
+
+import { NUM_FONT_WOFF2_BASE64 } from './vocab-font.js';
+import { CAT_PNG_BASE64 } from './vocab-cat.js';
 
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 
@@ -50,6 +57,16 @@ interface Book {
   sections: BookSection[];
 }
 
+interface BlockMastery {
+  block: number;
+  from: number;
+  to: number;
+  total: number;
+  mastered: number;
+  unmastered: number;
+  untried: number;
+}
+
 interface DashboardBook {
   id: number;
   name: string;
@@ -60,6 +77,9 @@ interface DashboardBook {
   rate: number;
   review_count: number;
   last_played_at: string | null;
+  blocks: BlockMastery[];
+  checkups: { at: string; total: number; correct: number; score: number }[];
+  checkup_score: { score: number; correct: number; total: number; sessions: number } | null;
 }
 
 interface Dashboard {
@@ -82,7 +102,7 @@ interface LogEntry extends Word {
   ms: number | null;
 }
 
-type Kind = 'normal' | 'review' | 'retry';
+type Kind = 'normal' | 'review' | 'retry' | 'checkup';
 
 // ── 状態 ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +110,8 @@ type Kind = 'normal' | 'review' | 'retry';
 const BLOCK = 100;
 /** 1回のテストで出せる上限。サーバーの MAX_WORDS_PER_REQUEST と揃えること。 */
 const MAX_QUESTIONS = 500;
+/** 実力テストの制限時間（秒）。即答できるかを測るので固定する。 */
+const CHECKUP_TIMER = 5;
 
 const cfg = {
   bookId: 0,
@@ -103,6 +125,8 @@ const cfg = {
   /** 既定はランダム。番号順だと毎回おなじ並びで、順番で覚えてしまう。 */
   ord: 'rnd' as 'seq' | 'rnd',
   tmr: 0,
+  /** 実力テストの問題数。多いほど点が安定する（20問は±9ポイント、50問は±6ポイント）。 */
+  checkupSize: 20,
 };
 
 const state = {
@@ -166,6 +190,25 @@ function jstNow(): string {
   return d.toISOString().slice(0, -1) + '+09:00';
 }
 
+/**
+ * 次の共通テストまでの日数。
+ *
+ * 共通テストは「1月13日以降の最初の土曜日・日曜日」に実施される。
+ * 年をまたぐので、その年の日程を過ぎていたら翌年で数え直す。
+ */
+function daysToExam(now = new Date()): { days: number; date: Date } {
+  const firstSatOnOrAfter13 = (year: number): Date => {
+    const d = new Date(year, 0, 13);
+    while (d.getDay() !== 6) d.setDate(d.getDate() + 1);
+    return d;
+  };
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let exam = firstSatOnOrAfter13(today.getFullYear());
+  if (exam < today) exam = firstSatOnOrAfter13(today.getFullYear() + 1);
+  const days = Math.round((exam.getTime() - today.getTime()) / 86_400_000);
+  return { days, date: exam };
+}
+
 function fmtDate(iso: string): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   return m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : iso;
@@ -194,25 +237,36 @@ function injectStyles(): void {
   el.id = 'vocab-styles';
   el.textContent = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+/* 数字用。数字と記号だけのサブセットを埋め込んである（vocab-font.ts） */
+@font-face{font-family:'ChakraNum';font-style:normal;font-weight:700;font-display:block;
+  src:url(data:font/woff2;base64,${NUM_FONT_WOFF2_BASE64}) format('woff2')}
+/* YouTube のトンマナに合わせたダーク配色で固定。端末の設定には追随しない。
+
+   色はスライドから抽出した値をもとに、暗い地の上で沈まないよう彩度と明度を上げてある
+   （抽出値 #983CF1 / #DFF04E → 実装 #A93BFF / #D8FF3A）。
+   **発光（グロー）は使わない。** 色だけで蛍光感を出す。
+
+   差し色は2色。役割を固定して混ぜないこと。
+     --lime        … 押すところと、できたところ。主ボタン、選択中のチップ、
+                      スライダーのつまみ、選択中のタブ、習得済み、正解、成績の数字
+     --accent（紫）… ブランドの色。上端の進捗バーと出題カードの光の線だけ。
+                      暗い地の上では輝度差が小さく、文字やボタンに使うと読みにくい
+     --ng          … 誤答と「復習が必要」だけ。それ以外に使わない */
 :root{
-  --bg:#0B0C0E; --surface:#141619; --surface2:#1C1F23;
-  --line:#26292E; --line2:#33373D;
-  --fg:#F2F3F5; --fg2:#A0A6AF; --fg3:#6B7280;
-  --accent:#5BF0C0; --accent2:#0B0C0E;
-  --ok:#5BF0C0; --ng:#FF6B6B;
+  --bg:#13161D; --surface:#1A1E27; --surface2:#232833;
+  --line:#2A2F3B; --line2:#3A4150;
+  --fg:#FFFFFF; --fg2:#A6ADBB; --fg3:#6E7686;
+  --accent:#A93BFF; --accent2:#FFFFFF;
+  --lime:#D8FF3A; --blue:#4990EF;
+  --ok:#D8FF3A; --ng:#FF5A6E;
   --q:26px; --a:21px; --r:10px;
-}
-@media (prefers-color-scheme: light){
-  :root{
-    --bg:#FAFAFA; --surface:#FFFFFF; --surface2:#F4F5F6;
-    --line:#E4E6E9; --line2:#D3D6DA;
-    --fg:#0B0C0E; --fg2:#5B6169; --fg3:#8B919A;
-    --accent:#0FA37F; --accent2:#FFFFFF;
-    --ok:#0FA37F; --ng:#E03131;
-  }
+  /* 主役の数字は等幅をやめる。等幅は桁を揃えるための書体で、大きく出すと間延びする。
+     ChakraNum は数字と記号だけのサブセット。**和文や英単語には使わない**（落ちる）。 */
+  --num:'ChakraNum',-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  color-scheme: dark;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:var(--bg);color:var(--fg);
+body{margin:0;background:var(--bg);color:var(--fg);overflow-x:hidden;
   font-family:"Inter","Noto Sans JP",-apple-system,"Hiragino Sans",sans-serif;
   font-size:16px;line-height:1.75;letter-spacing:-.005em;
   font-feature-settings:"palt" 1;-webkit-font-smoothing:antialiased}
@@ -222,15 +276,16 @@ button,input{font-family:inherit;font-size:inherit}
   position:sticky;top:0;z-index:5}
 .v-top .ttl{font-size:15px;font-weight:700;letter-spacing:-.02em;white-space:nowrap;
   display:flex;align-items:center;gap:8px}
-.v-top .ttl::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
-  box-shadow:0 0 10px var(--accent)}
+.v-top .ttl::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--lime)}
+/* min-width:0 が無いと、flexアイテムの最小幅が中身の長さになって縮まず、
+   単語帳名が長いときにヘッダーごと横に伸びて画面全体が横スクロールする。 */
 .v-top .rng{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg3);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
 .v-top .cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:12.5px;font-weight:500;
   color:var(--fg2);border:1px solid var(--line2);padding:2px 10px;border-radius:99px;white-space:nowrap}
 .v-bar{height:2px;background:var(--line)}
 .v-bar i{display:block;height:100%;background:var(--accent);width:0;
-  transition:width .25s cubic-bezier(.4,0,.2,1);box-shadow:0 0 12px var(--accent)}
+  transition:width .25s cubic-bezier(.4,0,.2,1)}
 .v-wrap{max-width:860px;margin:0 auto;padding:18px 14px 40px}
 .v-hide{display:none !important}
 
@@ -248,11 +303,15 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-hint{font-size:12.5px;color:var(--fg3)}
 .v-chip{border:1px solid var(--line2);background:var(--surface2);color:var(--fg2);
   padding:8px 14px;border-radius:99px;cursor:pointer;font-size:13.5px;font-weight:500;transition:.15s}
-.v-chip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);
-  color:var(--accent);font-weight:600}
+/* 選択中はライム。紫は暗い地の上だと輝度差が小さく、選ばれているかが読み取りにくい。
+   紫は主ボタン（実行）だけに残す。 */
+.v-chip.on{border-color:var(--lime);background:color-mix(in srgb,var(--lime) 16%,transparent);
+  color:var(--lime);font-weight:700}
 .v-chip:active{transform:scale(.97)}
-.v-go{width:100%;margin-top:8px;padding:16px;border:none;background:var(--accent);color:var(--accent2);
-  font-size:16px;font-weight:700;border-radius:10px;cursor:pointer;letter-spacing:-.01em}
+/* 主ボタンはライム地に暗い文字。暗い地の上では紫より圧倒的に読める。
+   紫は上端の進捗バーと出題カードの光の線に残し、ブランドの色として効かせる。 */
+.v-go{width:100%;margin-top:8px;padding:16px;border:none;background:var(--lime);color:var(--bg);
+  font-size:16px;font-weight:800;border-radius:10px;cursor:pointer;letter-spacing:-.01em}
 .v-go:active{transform:scale(.99)}
 .v-go:disabled{background:var(--line2);color:var(--fg3);cursor:default}
 .v-ghost{width:100%;margin-top:8px;padding:14px;border:1px solid var(--line2);background:var(--surface2);
@@ -260,7 +319,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-ghost:active{transform:scale(.99)}
 /* ボタンの直後にカードが続くと詰まって見えるので、ここで区切りを作る */
 .v-go + .v-card, .v-ghost + .v-card, .v-go + .v-list, .v-ghost + .v-list,
-.v-go + .v-stats, .v-ghost + .v-stats, .v-go + .v-mastery, .v-ghost + .v-mastery{margin-top:26px}
+.v-go + .v-stats, .v-ghost + .v-stats{margin-top:26px}
 .v-books{display:flex;flex-wrap:wrap;gap:8px}
 .v-book{border:1px solid var(--line2);background:var(--surface2);color:var(--fg2);
   padding:10px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;
@@ -271,33 +330,19 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   font-style:normal;color:var(--fg3);margin-top:2px;letter-spacing:.03em}
 .v-book.on em{color:color-mix(in srgb,var(--accent) 72%,var(--fg3))}
 
-/* ── 習得率 ── */
-.v-mastery{border:1px solid var(--line);background:var(--surface);border-radius:14px;
-  padding:18px 16px;margin:0 0 12px}
-.v-mastery .nm{font-size:13.5px;color:var(--fg2);font-weight:600;margin-bottom:8px}
-.v-mastery .big{display:flex;align-items:baseline;gap:12px}
-.v-mastery .big b{font-family:"JetBrains Mono",monospace;font-size:40px;font-weight:700;
-  color:var(--accent);line-height:1;letter-spacing:-.03em}
-.v-mastery .big span{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--fg2)}
-.v-mbar{height:8px;background:var(--surface2);border:1px solid var(--line2);border-radius:99px;
-  margin:14px 0 8px;overflow:hidden;display:flex}
-.v-mbar i{display:block;height:100%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
-.v-mbar u{display:block;height:100%;background:color-mix(in srgb,var(--ng) 30%,transparent)}
-.v-mlegend{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg3);letter-spacing:.02em}
-
 .v-lead{border:1px solid var(--line);background:var(--surface);border-radius:14px;
   padding:16px;margin:0 0 12px}
 .v-lead .cap{font-size:13px;color:var(--fg2);margin-bottom:6px}
-.v-lead .n{font-family:"JetBrains Mono",monospace;font-size:32px;font-weight:700;
-  color:var(--fg);line-height:1.1;letter-spacing:-.03em}
+.v-lead .n{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:32px;font-weight:700;
+  color:var(--fg);line-height:1.1;letter-spacing:-.02em}
 .v-lead .n em{font-style:normal;font-size:14px;color:var(--fg2);margin-left:4px}
 
 .v-spark{display:block;width:100%;height:118px;margin:8px 0 4px}
 .v-stats{display:flex;gap:10px;flex-wrap:wrap}
 .v-stat{flex:1;min-width:92px;border:1px solid var(--line);background:var(--surface);
   border-radius:var(--r);padding:13px 14px}
-.v-stat b{display:block;font-family:"JetBrains Mono",monospace;font-size:32px;font-weight:700;
-  line-height:1.1;letter-spacing:-.03em}
+.v-stat b{display:block;font-family:var(--num);font-variant-numeric:tabular-nums;font-size:32px;
+  font-weight:700;line-height:1.1;letter-spacing:-.02em}
 .v-stat span{font-size:11.5px;color:var(--fg3)}
 
 .v-list{background:var(--surface);border:1px solid var(--line);border-radius:12px;
@@ -307,7 +352,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-list h3 em{font-family:"JetBrains Mono",monospace;font-size:10.5px;font-style:normal;
   color:var(--ng);border:1px solid color-mix(in srgb,var(--ng) 45%,transparent);
   padding:2px 9px;border-radius:99px}
-.v-list h3.o em{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.v-list h3.o em{color:var(--lime);border-color:color-mix(in srgb,var(--lime) 45%,transparent)}
 .v-list ul{margin:0;padding:2px 0;list-style:none;max-height:300px;overflow:auto}
 .v-list li{display:grid;grid-template-columns:40px 1fr;gap:2px 8px;padding:8px 15px;font-size:14.5px;
   border-bottom:1px solid var(--line)}
@@ -318,6 +363,76 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-list li .j{color:var(--fg2);font-size:13.5px}
 .v-list li .x{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ng);margin-left:6px}
 .v-list li .t{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ng)}
+
+/* ── 下部の固定タブ ── */
+/* LINE内ブラウザは戻る操作がしづらいので、画面間の移動は必ずここでできるようにする。 */
+.v-nav{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;
+  background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(14px);
+  border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.v-nav button{flex:1;background:none;border:none;color:var(--fg3);font-family:inherit;
+  padding:9px 4px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;
+  font-size:11px;font-weight:600;letter-spacing:.02em;cursor:pointer}
+.v-nav button svg{width:22px;height:22px;display:block;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.v-nav button.on{color:var(--lime)}
+.v-nav button:active{transform:scale(.97)}
+/* タブに隠れないよう、本文の下に余白を作る */
+.v-wrap{padding-bottom:96px}
+
+/* ── 猫のカウントダウン ── */
+.v-cat{display:flex;align-items:center;gap:12px;border:1px solid var(--line);
+  background:var(--surface);border-radius:14px;padding:12px 14px;margin:0 0 12px}
+.v-cat .av{width:52px;height:52px;border-radius:50%;background:#FFF;flex:none;
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
+.v-cat .av img{width:44px;height:44px;object-fit:contain;display:block}
+.v-cat .say{min-width:0}
+.v-cat .say em{display:block;font-style:normal;font-size:12.5px;color:var(--fg2);line-height:1.5}
+.v-cat .say b{display:block;font-family:var(--num);font-variant-numeric:tabular-nums;
+  font-size:30px;font-weight:700;color:var(--lime);line-height:1.15;letter-spacing:-.02em}
+.v-cat .say b i{font-style:normal;font-size:.48em;font-weight:700;color:var(--fg2);
+  margin-left:4px;letter-spacing:0}
+.v-cat .dt{margin-left:auto;text-align:right;font-family:var(--num);
+  font-variant-numeric:tabular-nums;font-size:11px;color:var(--fg3);line-height:1.5;flex:none}
+
+/* ── セクション一覧（テストタブ） ── */
+.v-sec{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--surface);
+  color:var(--fg);border-radius:12px;padding:13px 14px;margin:0 0 8px;font-family:inherit;cursor:pointer}
+.v-sec:active{transform:scale(.995)}
+.v-sec .r1{display:flex;align-items:baseline;gap:10px}
+.v-sec .rg{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;
+  letter-spacing:-.01em}
+.v-sec .pc{margin-left:auto;font-family:var(--num);font-variant-numeric:tabular-nums;font-size:16px;
+  font-weight:700;color:var(--lime)}
+.v-sec .pc.zero{color:var(--fg3)}
+.v-sec .tr{height:6px;background:var(--surface2);border-radius:99px;overflow:hidden;display:flex;margin-top:8px}
+.v-sec .tr i{display:block;height:100%;background:var(--lime)}
+.v-sec .tr u{display:block;height:100%;background:color-mix(in srgb,var(--ng) 60%,transparent)}
+.v-sec .sub{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:11px;color:var(--fg3);
+  margin-top:5px;display:block}
+details.v-adv{border:1px solid var(--line);background:var(--surface);border-radius:var(--r);
+  padding:0 16px;margin:14px 0 0}
+details.v-adv summary{cursor:pointer;padding:14px 0;font-size:13.5px;font-weight:600;color:var(--fg2);
+  list-style:none;display:flex;align-items:center;gap:8px}
+details.v-adv summary::-webkit-details-marker{display:none}
+details.v-adv summary::before{content:"+";font-family:var(--num);color:var(--lime);font-weight:700}
+details.v-adv[open] summary::before{content:"−"}
+details.v-adv > div{padding-bottom:16px}
+
+/* ── 実力テストのスコア ── */
+.v-score-card{border:1px solid var(--line);background:var(--surface);border-radius:14px;
+  padding:18px 16px;margin:0 0 12px}
+.v-score-card .hd{display:flex;align-items:baseline;gap:10px;margin-bottom:2px}
+.v-score-card .hd em{font-style:normal;font-size:13.5px;color:var(--fg2);font-weight:600}
+.v-score-card .hd span{margin-left:auto;font-family:var(--num);font-variant-numeric:tabular-nums;
+  font-size:11px;color:var(--fg3)}
+.v-score-card .val{display:flex;align-items:baseline;gap:10px}
+.v-score-card .val b{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:58px;
+  font-weight:700;color:var(--lime);line-height:.95;letter-spacing:-.02em}
+.v-score-card .val b i{font-style:normal;font-size:.34em;font-weight:700;color:var(--fg2);
+  margin-left:4px;vertical-align:.5em;letter-spacing:0}
+.v-score-card .val u{text-decoration:none;font-family:var(--num);font-variant-numeric:tabular-nums;
+  font-size:13px;color:var(--fg2)}
+.v-score-card .none{font-size:13.5px;color:var(--fg2);line-height:1.7}
 
 /* ── 単語帳の選択 ── */
 .v-pick{display:block;width:100%;text-align:left;border:1px solid var(--line2);background:var(--surface);
@@ -331,21 +446,10 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   font-size:12.5px;text-decoration:underline;cursor:pointer;padding:0}
 
 /* ── 習得の内訳 ── */
-.v-seg{height:10px;border-radius:99px;overflow:hidden;display:flex;margin:14px 0 10px;
-  background:var(--surface2);border:1px solid var(--line2)}
-.v-seg i{display:block;height:100%;background:var(--accent)}
-.v-seg u{display:block;height:100%;background:color-mix(in srgb,var(--ng) 55%,transparent)}
-.v-key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--fg2)}
-.v-key span{display:flex;align-items:center;gap:6px}
-.v-key i{width:8px;height:8px;border-radius:50%;display:block;flex:none}
-.v-key .k1 i{background:var(--accent)}
-.v-key .k2 i{background:color-mix(in srgb,var(--ng) 55%,transparent)}
-.v-key .k3 i{background:transparent;border:1px solid var(--line2)}
-.v-key b{font-family:"JetBrains Mono",monospace;font-weight:600;color:var(--fg)}
 .v-note{font-size:12.5px;color:var(--fg3);line-height:1.7;margin:12px 0 0}
 
 /* ── 範囲スライダー ── */
-.v-rng{font-family:"JetBrains Mono",monospace;font-size:24px;font-weight:700;letter-spacing:-.02em;
+.v-rng{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:27px;font-weight:700;letter-spacing:-.01em;
   display:flex;align-items:baseline;gap:8px;margin:0 0 2px}
 .v-rng small{font-size:12px;color:var(--fg3);font-weight:500}
 .v-sl{display:flex;align-items:center;gap:12px;margin:14px 0 0}
@@ -353,21 +457,21 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-sl input[type=range]{flex:1;-webkit-appearance:none;appearance:none;background:transparent;height:28px;margin:0}
 .v-sl input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:var(--line2)}
 .v-sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:26px;height:26px;
-  border-radius:50%;background:var(--accent);border:none;margin-top:-11px;
+  border-radius:50%;background:var(--lime);border:none;margin-top:-11px;
   box-shadow:0 0 0 1px var(--bg),0 2px 8px rgba(0,0,0,.35)}
 .v-sl input[type=range]::-moz-range-track{height:4px;border-radius:99px;background:var(--line2)}
 .v-sl input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;
-  background:var(--accent);border:none}
+  background:var(--lime);border:none}
 
 /* ── 出題 ── */
 .v-stage{background:var(--surface);border:1px solid var(--line);border-radius:14px;
   padding:32px 20px;margin:0 0 12px;text-align:center;position:relative;overflow:hidden}
 .v-stage::before{content:"";position:absolute;inset:0 0 auto 0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.55}
+  background:linear-gradient(90deg,transparent,var(--accent),var(--blue),transparent);opacity:.75}
 .v-tbar{position:absolute;top:0;left:0;right:0;height:3px;background:var(--line)}
 .v-tbar i{display:block;height:100%;width:100%;background:var(--accent);
-  transform-origin:left center;box-shadow:0 0 10px var(--accent);transition:background .2s}
-.v-tbar.warn i{background:var(--ng);box-shadow:0 0 10px var(--ng)}
+  transform-origin:left center;transition:background .2s}
+.v-tbar.warn i{background:var(--ng)}
 .v-tbar b{position:absolute;right:10px;top:9px;font-family:"JetBrains Mono",monospace;
   font-size:11px;font-weight:500;color:var(--fg3)}
 .v-tbar.warn b{color:var(--ng)}
@@ -375,16 +479,17 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   font-weight:500;margin-bottom:14px}
 .v-qword{font-size:var(--q);font-weight:700;line-height:1.35;letter-spacing:-.025em;word-break:break-word}
 .v-reveal{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
-.v-aword{font-size:var(--a);font-weight:600;color:var(--accent);line-height:1.5}
+.v-aword{font-size:var(--a);font-weight:600;color:var(--lime);line-height:1.5}
 .v-opts{display:grid;gap:8px;margin:20px 0 0}
-.v-opt{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--line2);
+.v-opt{display:flex;align-items:center;gap:11px;padding:12px 13px;border:1px solid var(--line2);
   background:var(--surface2);color:var(--fg);border-radius:10px;cursor:pointer;
-  text-align:left;font-size:16px;font-weight:500;transition:.14s;width:100%}
+  text-align:left;font-size:15px;line-height:1.45;font-weight:500;transition:.14s;width:100%}
+.v-opt > span:last-child{min-width:0;word-break:break-word}
 .v-opt .k{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:500;color:var(--fg3);
   border:1px solid var(--line2);width:23px;height:23px;border-radius:6px;display:flex;
   align-items:center;justify-content:center;flex:none}
-.v-opt.ok{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent);color:var(--ok)}
-.v-opt.ok .k{border-color:var(--ok);color:var(--ok)}
+.v-opt.ok{border-color:var(--lime);background:color-mix(in srgb,var(--lime) 14%,transparent);color:var(--lime)}
+.v-opt.ok .k{border-color:var(--lime);color:var(--lime)}
 .v-opt.ng{border-color:var(--ng);background:color-mix(in srgb,var(--ng) 12%,transparent);color:var(--ng)}
 .v-opt.ng .k{border-color:var(--ng);color:var(--ng)}
 .v-acts{display:flex;gap:8px;flex-wrap:wrap}
@@ -392,8 +497,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   font-size:15.5px;font-weight:600;border:1px solid var(--line2);
   background:var(--surface2);color:var(--fg)}
 .v-acts button:active{transform:scale(.99)}
-.v-acts .pri{background:var(--accent);border-color:var(--accent);color:var(--accent2);font-weight:700}
-.v-acts .yes{border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}
+.v-acts .pri{background:var(--lime);border-color:var(--lime);color:var(--bg);font-weight:800}
+.v-acts .yes{border-color:color-mix(in srgb,var(--lime) 45%,transparent);color:var(--lime)}
 .v-acts .no2{border-color:color-mix(in srgb,var(--ng) 45%,transparent);color:var(--ng)}
 .v-abort{display:block;margin:16px auto 0;background:none;border:none;color:var(--fg3);
   font-size:12.5px;text-decoration:underline;cursor:pointer}
@@ -401,11 +506,11 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 /* ── 結果 ── */
 .v-score{display:flex;align-items:baseline;gap:14px;background:var(--surface);
   border:1px solid var(--line);border-radius:14px;padding:20px;margin:0 0 12px}
-.v-score b{font-family:"JetBrains Mono",monospace;font-size:38px;font-weight:700;
-  color:var(--accent);line-height:1;letter-spacing:-.03em}
-.v-score span{font-size:13px;color:var(--fg2);font-family:"JetBrains Mono",monospace}
-.v-delta{font-family:"JetBrains Mono",monospace;font-size:14px;color:var(--fg2)}
-.v-delta b{color:var(--accent);font-size:20px;font-weight:700}
+.v-score b{font-family:var(--num);font-size:42px;font-weight:700;font-variant-numeric:tabular-nums;
+  color:var(--lime);line-height:1;letter-spacing:-.02em}
+.v-score span{font-size:13.5px;color:var(--fg2);font-family:var(--num);font-variant-numeric:tabular-nums}
+.v-delta{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:14px;color:var(--fg2)}
+.v-delta b{color:var(--lime);font-size:20px;font-weight:700}
 .v-cp{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .v-cp button{padding:10px 14px;border:1px solid var(--line2);background:var(--surface2);
   color:var(--fg2);border-radius:9px;cursor:pointer;font-size:12.5px;font-weight:600}
@@ -421,7 +526,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-blk{display:flex;align-items:center;gap:9px;margin-bottom:6px}
 .v-blk .lb{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--fg3);width:64px;flex:none}
 .v-blk .tr{flex:1;height:7px;background:var(--surface2);border-radius:99px;overflow:hidden}
-.v-blk .tr i{display:block;height:100%;background:var(--accent)}
+.v-blk .tr i{display:block;height:100%;background:var(--lime)}
 .v-blk .vl{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg2);width:38px;
   text-align:right;flex:none}
 .v-empty{text-align:center;color:var(--fg2);font-size:14px;padding:26px 10px}
@@ -435,7 +540,24 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 
 // ── 画面の骨格 ──────────────────────────────────────────────────────────────
 
-function shell(title: string, sub: string, body: string, count = ''): string {
+type Tab = 'home' | 'test' | 'records' | null;
+
+/** 下部タブ。出題中は出さない（誤って触ってテストが飛ぶのを防ぐ）。 */
+function navBar(active: Tab): string {
+  if (!active) return '';
+  const item = (key: Exclude<Tab, null>, label: string, path: string) =>
+    `<button data-tab="${key}" class="${active === key ? 'on' : ''}">
+       <svg viewBox="0 0 24 24" aria-hidden="true">${path}</svg>${label}
+     </button>`;
+  return `
+<nav class="v-nav">
+  ${item('home', 'ホーム', '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/>')}
+  ${item('test', 'テスト', '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9.5 13.5l2 2 3.5-4"/>')}
+  ${item('records', '記録', '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M3 20h18"/>')}
+</nav>`;
+}
+
+function shell(title: string, sub: string, body: string, count = '', tab: Tab = 'home'): string {
   return `
 <div class="v-top">
   <span class="ttl">単語テスト</span>
@@ -443,7 +565,20 @@ function shell(title: string, sub: string, body: string, count = ''): string {
   ${count ? `<span class="cnt">${esc(count)}</span>` : ''}
 </div>
 <div class="v-bar"><i id="vProg"></i></div>
-<div class="v-wrap">${title ? `<h1>${esc(title)}</h1>` : ''}${body}</div>`;
+<div class="v-wrap"${tab ? '' : ' style="padding-bottom:40px"'}>${title ? `<h1>${esc(title)}</h1>` : ''}${body}</div>
+${navBar(tab)}`;
+}
+
+/** タブの配線。画面を描くたびに呼ぶ。 */
+function bindNav(): void {
+  document.querySelectorAll<HTMLElement>('.v-nav button').forEach((b) => {
+    b.onclick = () => {
+      const t = b.dataset.tab;
+      if (t === 'home') void showHome();
+      else if (t === 'test') renderSetup();
+      else if (t === 'records') void showRecords();
+    };
+  });
 }
 
 function renderLoading(): void {
@@ -502,14 +637,14 @@ function sparkline(points: { rate: number; at: string; kind: string }[]): string
       (p, i) =>
         `<circle cx="${x(i).toFixed(1)}" cy="${y(p.rate).toFixed(1)}" r="${
           p.kind === 'normal' ? 3.5 : 3
-        }" fill="${p.kind === 'normal' ? 'var(--accent)' : 'var(--surface)'}"
-         stroke="var(--accent)" stroke-width="1.5"/>`,
+        }" fill="${p.kind === 'normal' ? 'var(--lime)' : 'var(--surface)'}"
+         stroke="var(--lime)" stroke-width="1.5"/>`,
     )
     .join('');
 
   return `<svg class="v-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="正答率の推移">
     ${grid}
-    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"
+    <path d="${d}" fill="none" stroke="var(--lime)" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"/>
     ${dots}
     <text x="${L}" y="${H - 6}" fill="var(--fg3)" font-size="10"
@@ -519,25 +654,48 @@ function sparkline(points: { rate: number; at: string; kind: string }[]): string
   </svg>`;
 }
 
-/** 習得の内訳。3つの状態を同じ言葉で、同じ場所に出す。 */
-function masteryCard(b: DashboardBook): string {
-  const w1 = b.total ? (b.mastered / b.total) * 100 : 0;
-  const w2 = b.total ? (b.unmastered / b.total) * 100 : 0;
+/**
+ * 実力テストのスコア。全範囲からランダム20問の正答率。
+ *
+ * これが唯一の実力の指標。語ごとの状態はセクション一覧と復習の出題にだけ使う。
+ */
+function checkupCard(b: DashboardBook): string {
+  const cs = b.checkups || [];
+  const pooled = b.checkup_score;
+  const latest = cs.length ? cs[cs.length - 1] : null;
+  const spark = cs.length >= 2 ? sparkline(cs.map((c) => ({ rate: c.score, at: c.at, kind: 'normal' }))) : '';
+
+  if (!pooled || !latest) {
+    return `
+<div class="v-score-card">
+  <div class="hd"><em>実力テストのスコア</em></div>
+  <p class="none">単語帳の<b>全範囲</b>から、100語ごとに均等に出します。<br>いま何割答えられるかが分かります。</p>
+</div>`;
+  }
   return `
-<div class="v-mastery">
-  <div class="nm">${esc(b.name)}</div>
-  <div class="big"><b>${pct(b.rate)}</b><span>${b.mastered} / ${b.total} 語</span></div>
-  <div class="v-seg">
-    <i style="width:${w1.toFixed(2)}%"></i><u style="width:${w2.toFixed(2)}%"></u>
+<div class="v-score-card">
+  <div class="hd"><em>実力テストのスコア</em><span>${esc(fmtDate(latest.at).slice(0, 5))}</span></div>
+  <div class="val">
+    <b>${Math.round(pooled.score * 100)}<i>%</i></b>
+    <u>直近${pooled.sessions}回・${pooled.total}問から算出<br>
+       最新は ${Math.round(latest.score * 100)}%（${latest.correct}/${latest.total}）</u>
   </div>
-  <div class="v-key">
-    <span class="k1"><i></i>習得済み <b>${b.mastered}</b></span>
-    <span class="k2"><i></i>復習が必要 <b>${b.unmastered}</b></span>
-    <span class="k3"><i></i>未挑戦 <b>${b.untried}</b></span>
-  </div>
-  <p class="v-note">
-    テストで間違えた単語は「復習が必要」に入ります。次のテストで正解すると「習得済み」に移ります。
-  </p>
+  ${spark}
+</div>`;
+}
+
+/** 共通テストまでの日数。猫にしゃべらせる。 */
+function catBar(): string {
+  const { days, date } = daysToExam();
+  const md = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  return `
+<div class="v-cat">
+  <span class="av"><img src="data:image/png;base64,${CAT_PNG_BASE64}" alt=""></span>
+  <span class="say">
+    <em>共通テストまで</em>
+    <b>${days}<i>日</i></b>
+  </span>
+  <span class="dt">${esc(md)}<br>（土）から</span>
 </div>`;
 }
 
@@ -560,7 +718,8 @@ ${state.books
   .join('')}
 ${canCancel ? '<button class="v-ghost" id="vCancel">やめる</button>' : ''}`;
 
-  app().innerHTML = shell('単語帳を選ぶ', '', body);
+  app().innerHTML = shell('単語帳を選ぶ', '', body, '', 'home');
+  bindNav();
 
   document.querySelectorAll<HTMLElement>('.v-pick').forEach((el) => {
     el.onclick = async () => {
@@ -637,73 +796,56 @@ async function showHome(): Promise<void> {
 
   const hasHistory = d.totals.sessions > 0;
 
+  // ホームの主導線は実力テスト。復習はその下の補助ボタン。
   const reviewBlock = book.unmastered
-    ? `<button class="v-go" id="vReview">復習が必要な単語を解く</button>
-       <p class="v-note" style="margin:8px 0 0;text-align:center">
-         ${book.unmastered}語のうち、番号の若い順に${Math.min(book.unmastered, 20)}語
-       </p>`
+    ? '<button class="v-ghost" id="vReview">復習テストを受ける</button>'
     : hasHistory
       ? '<p class="v-note" style="text-align:center">復習が必要な単語はまだありません。</p>'
       : '';
 
-  const trendBlock = d.recent.enough
-    ? `<div class="v-card">
-         <span class="lg">最近の正答率</span>
-         ${sparkline(d.recent.sessions)}
-         <div class="v-mlegend">直近 ${d.recent.sessions.length} 回　最新 ${
-           d.recent.latest_rate === null ? '—' : pct(d.recent.latest_rate)
-         }</div>
-       </div>`
-    : `<div class="v-card">
-         <span class="lg">最近の正答率</span>
-         <p class="v-hint" style="margin:0">あと ${d.recent.needed} 回でグラフが出ます。</p>
-       </div>`;
-
-  const weakBlock = d.weak_words.length
-    ? `<div class="v-list">
-         <h3>くり返し間違えている単語</h3>
-         <ul>${d.weak_words
-           .map(
-             (w) => `<li><span class="n">${no3(w.no)}</span><span class="e">${esc(w.en)}<span class="x">×${
-               w.wrong
-             }/${w.asked}</span></span><span class="j">${esc(w.ja)}</span></li>`,
-           )
-           .join('')}</ul>
-       </div>`
-    : '';
-
-  const totalsBlock = hasHistory
-    ? `<div class="v-stats">
-         <div class="v-stat"><b>${d.totals.answers}</b><span>解いた問題</span></div>
-         <div class="v-stat"><b>${d.totals.days}</b><span>学習日数</span></div>
-         <div class="v-stat"><b>${d.totals.sessions}</b><span>実施回数</span></div>
-       </div>`
-    : '';
-
+  // ホームはスクロールなしで収める。推移・弱点語・累計は「テスト結果を見る」に置く。
+  // ホームは実力テスト1本に絞る。セクションごとの定着率はテストタブ、
+  // 数字は実力テストのスコア1本。同じことを2箇所で言わない。
   const body = hasHistory
-    ? masteryCard(book) +
+    ? catBar() +
+      checkupCard(book) +
+      '<button class="v-go" id="vCheckup">実力テストを受ける</button>' +
+      `<div class="v-row" style="justify-content:center;margin-top:10px">${[20, 30, 50]
+        .map(
+          (n) =>
+            `<button class="v-chip${cfg.checkupSize === n ? ' on' : ''}" data-size="${n}">${n}問</button>`,
+        )
+        .join('')}</div>` +
+      '<button class="v-ghost" id="vStart">セクションテストを受ける</button>' +
       reviewBlock +
-      '<button class="v-ghost" id="vStart">テストを始める</button>' +
-      '<button class="v-ghost" id="vRecords">記録を見る</button>' +
-      trendBlock +
-      weakBlock +
-      totalsBlock +
       '<button class="v-switch" id="vSwitch">単語帳を切り替える</button>'
     : // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
+      catBar() +
+      checkupCard(book) +
       `<div class="v-lead">
          <div class="cap">${esc(book.name)}</div>
          <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは20語やってみましょう</div>
        </div>
-       <button class="v-go" id="vStart">テストを始める</button>
+       <button class="v-go" id="vStart">セクションテストを受ける</button>
        <button class="v-switch" id="vSwitch">単語帳を切り替える</button>`;
 
   app().innerHTML = shell('', book.name, body);
+  bindNav();
 
   const bind = (id: string, fn: () => void) => {
     const el = document.getElementById(id);
     if (el) el.onclick = fn;
   };
   bind('vStart', () => renderSetup());
+  bind('vCheckup', () => void startCheckup());
+  document.querySelectorAll<HTMLElement>('[data-size]').forEach((el) => {
+    el.onclick = () => {
+      cfg.checkupSize = Number(el.dataset.size);
+      document.querySelectorAll<HTMLElement>('[data-size]').forEach((x) =>
+        x.classList.toggle('on', Number(x.dataset.size) === cfg.checkupSize),
+      );
+    };
+  });
   bind('vRecords', () => void showRecords());
   bind('vReview', () => void startReview());
   bind('vSwitch', () => renderBookPicker(true));
@@ -715,8 +857,10 @@ function blockMax(book: Book): number {
   return Math.ceil(book.max_no / BLOCK);
 }
 
+/** セクション（100語ブロック）の一覧。定着率つきで、押すとその範囲のテストが始まる。 */
 function renderSetup(): void {
   const book = state.books.find((b) => b.id === cfg.bookId);
+  const dash = state.dashboard?.books.find((b) => b.id === cfg.bookId);
   if (!book) return;
 
   const nBlocks = blockMax(book);
@@ -726,115 +870,101 @@ function renderSetup(): void {
   const chip = (group: string, v: string, label: string, on: boolean) =>
     `<button class="v-chip${on ? ' on' : ''}" data-g="${group}" data-v="${v}">${esc(label)}</button>`;
 
-  const sectionChips = book.sections
-    .map(
-      (sec) =>
-        `<button class="v-chip" data-sec="${sec.from}-${sec.to}">${esc(
-          sec.name.split(' ').slice(0, 2).join(' ') || sec.name,
-        )}</button>`,
-    )
+  const sections = (dash?.blocks ?? [])
+    .map((b) => {
+      const rate = b.total ? b.mastered / b.total : 0;
+      const w1 = b.total ? (b.mastered / b.total) * 100 : 0;
+      const w2 = b.total ? (b.unmastered / b.total) * 100 : 0;
+      return `
+<button class="v-sec" data-from="${b.from}" data-to="${b.to}">
+  <span class="r1">
+    <span class="rg">${b.from} – ${b.to}</span>
+    <span class="pc${rate ? '' : ' zero'}">${pct(rate)}</span>
+  </span>
+  <span class="tr"><i style="width:${w1.toFixed(1)}%"></i><u style="width:${w2.toFixed(1)}%"></u></span>
+  <span class="sub">習得 ${b.mastered} ／ 復習 ${b.unmastered} ／ 未挑戦 ${b.untried}</span>
+</button>`;
+    })
     .join('');
 
   const body = `
-<div class="v-card">
-  <span class="lg">Range</span>
-  <div class="v-rng" id="vRngLabel"></div>
-  <div class="v-hint" id="vRngCount"></div>
-  <div class="v-sl">
-    <span>はじめ</span>
-    <input type="range" id="vFromSl" min="0" max="${nBlocks - 1}" step="1" value="${fromBlk}">
-  </div>
-  <div class="v-sl">
-    <span>おわり</span>
-    <input type="range" id="vToSl" min="0" max="${nBlocks - 1}" step="1" value="${toBlk}">
-  </div>
-  <div class="v-row" style="margin-top:14px">
-    ${sectionChips}
-    <button class="v-chip" data-sec="1-${book.max_no}">ぜんぶ</button>
-  </div>
-</div>
+<p class="v-sub">セクションを選ぶと、その範囲のテストが始まります。${cfg.lim}問・${
+    cfg.fmt === 'choice' ? '4択' : '意味を答える'
+  }・${cfg.dir === 'ej' ? '英→日' : '日→英'}。</p>
+${sections || '<p class="v-empty">セクションがありません。</p>'}
 
-<div class="v-card">
-  <span class="lg">出題数</span>
-  <div class="v-row">
-    ${[10, 20, 30, 50, 100]
-      .map((n) => chip('lim', String(n), `${n}問`, !cfg.limAll && cfg.lim === n))
-      .join('')}
-    ${chip('lim', 'all', '全部', cfg.limAll)}
-  </div>
-</div>
+<details class="v-adv">
+  <summary>範囲や形式を細かく決める</summary>
+  <div>
+    <div class="v-rng" id="vRngLabel"></div>
+    <div class="v-hint" id="vRngCount"></div>
+    <div class="v-sl"><span>はじめ</span>
+      <input type="range" id="vFromSl" min="0" max="${nBlocks - 1}" step="1" value="${fromBlk}"></div>
+    <div class="v-sl"><span>おわり</span>
+      <input type="range" id="vToSl" min="0" max="${nBlocks - 1}" step="1" value="${toBlk}"></div>
 
-<div class="v-card">
-  <span class="lg">Format</span>
-  <div class="v-row">
-    ${chip('fmt', 'choice', '4択', cfg.fmt === 'choice')}
-    ${chip('fmt', 'recall', '意味を答える', cfg.fmt === 'recall')}
-  </div>
-  <div class="v-row" style="margin-top:10px">
-    ${chip('dir', 'ej', '英 → 日', cfg.dir === 'ej')}
-    ${chip('dir', 'je', '日 → 英', cfg.dir === 'je')}
-  </div>
-  <div class="v-row" style="margin-top:10px">
-    ${chip('ord', 'seq', '番号順', cfg.ord === 'seq')}
-    ${chip('ord', 'rnd', 'ランダム', cfg.ord === 'rnd')}
-  </div>
-</div>
+    <p class="v-hint" style="margin:16px 0 6px">出題数</p>
+    <div class="v-row">
+      ${[10, 20, 30, 50, 100].map((n) => chip('lim', String(n), `${n}問`, !cfg.limAll && cfg.lim === n)).join('')}
+      ${chip('lim', 'all', '全部', cfg.limAll)}
+    </div>
 
-<div class="v-card">
-  <span class="lg">Timer</span>
-  <div class="v-row">
-    ${[0, 3, 5, 10, 15].map((n) => chip('tmr', String(n), n ? `${n}秒` : 'なし', cfg.tmr === n)).join('')}
+    <p class="v-hint" style="margin:16px 0 6px">形式</p>
+    <div class="v-row">
+      ${chip('fmt', 'choice', '4択', cfg.fmt === 'choice')}
+      ${chip('fmt', 'recall', '意味を答える', cfg.fmt === 'recall')}
+    </div>
+    <div class="v-row" style="margin-top:8px">
+      ${chip('dir', 'ej', '英 → 日', cfg.dir === 'ej')}
+      ${chip('dir', 'je', '日 → 英', cfg.dir === 'je')}
+    </div>
+    <div class="v-row" style="margin-top:8px">
+      ${chip('ord', 'seq', '番号順', cfg.ord === 'seq')}
+      ${chip('ord', 'rnd', 'ランダム', cfg.ord === 'rnd')}
+    </div>
+
+    <p class="v-hint" style="margin:16px 0 6px">制限時間</p>
+    <div class="v-row">
+      ${[0, 3, 5, 10, 15].map((n) => chip('tmr', String(n), n ? `${n}秒` : 'なし', cfg.tmr === n)).join('')}
+    </div>
+
+    <button class="v-go" id="vBegin">この設定ではじめる</button>
   </div>
-</div>
+</details>
+<p class="v-err v-hide" id="vMsg"></p>`;
 
-<p class="v-err v-hide" id="vMsg"></p>
-<button class="v-go" id="vBegin">はじめる</button>
-<button class="v-ghost" id="vBack">ホームに戻る</button>`;
+  app().innerHTML = shell('セクションテスト', book.name, body, '', 'test');
+  bindNav();
 
-  app().innerHTML = shell('', book.name, body);
+  document.querySelectorAll<HTMLElement>('.v-sec').forEach((el) => {
+    el.onclick = () => {
+      cfg.from = Number(el.dataset.from);
+      cfg.to = Number(el.dataset.to);
+      void startNormal();
+    };
+  });
 
   const fromSl = document.getElementById('vFromSl') as HTMLInputElement;
   const toSl = document.getElementById('vToSl') as HTMLInputElement;
-
   const paint = () => {
-    // 範囲は必ず 100語ブロックの境界に乗せる（1〜100 / 301〜700 のような形にしかならない）
     cfg.from = fromBlk * BLOCK + 1;
     cfg.to = Math.min((toBlk + 1) * BLOCK, book.max_no);
     const span = cfg.to - cfg.from + 1;
-    // 「全部」は範囲内の全単語。1回のテストとして現実的な上限（サーバーと同じ500）で頭打ちにする。
     if (cfg.limAll) cfg.lim = Math.min(span, MAX_QUESTIONS);
     const shown = Math.min(cfg.lim, span);
     document.getElementById('vRngLabel')!.textContent = `${cfg.from} 〜 ${cfg.to}`;
     document.getElementById('vRngCount')!.textContent = `この範囲に ${span} 語（${shown}問を出題）`;
   };
-
   fromSl.oninput = () => {
     fromBlk = Number(fromSl.value);
-    if (fromBlk > toBlk) {
-      toBlk = fromBlk;
-      toSl.value = String(toBlk);
-    }
+    if (fromBlk > toBlk) { toBlk = fromBlk; toSl.value = String(toBlk); }
     paint();
   };
   toSl.oninput = () => {
     toBlk = Number(toSl.value);
-    if (toBlk < fromBlk) {
-      fromBlk = toBlk;
-      fromSl.value = String(fromBlk);
-    }
+    if (toBlk < fromBlk) { fromBlk = toBlk; fromSl.value = String(fromBlk); }
     paint();
   };
-
-  document.querySelectorAll<HTMLElement>('.v-chip[data-sec]').forEach((b) => {
-    b.onclick = () => {
-      const [f, t] = b.dataset.sec!.split('-').map(Number);
-      fromBlk = Math.floor((f - 1) / BLOCK);
-      toBlk = Math.min(Math.ceil(t / BLOCK) - 1, nBlocks - 1);
-      fromSl.value = String(fromBlk);
-      toSl.value = String(toBlk);
-      paint();
-    };
-  });
 
   document.querySelectorAll<HTMLElement>('.v-chip[data-g]').forEach((b) => {
     b.onclick = () => {
@@ -845,15 +975,13 @@ function renderSetup(): void {
       else if (g === 'lim') {
         cfg.limAll = b.dataset.v === 'all';
         if (!cfg.limAll) cfg.lim = Number(b.dataset.v);
-      }
-      else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
+        paint();
+      } else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
       else if (g === 'dir') cfg.dir = b.dataset.v as 'ej' | 'je';
       else if (g === 'ord') cfg.ord = b.dataset.v as 'seq' | 'rnd';
-      if (g === 'lim') paint();
     };
   });
 
-  document.getElementById('vBack')!.onclick = () => void showHome();
   document.getElementById('vBegin')!.onclick = () => void startNormal();
   paint();
 }
@@ -888,15 +1016,42 @@ async function startNormal(): Promise<void> {
   }
 }
 
-async function startReview(): Promise<void> {
+/** 実力テスト。全範囲から100語ごとに均等に出す。 */
+async function startCheckup(size = cfg.checkupSize): Promise<void> {
   renderLoading();
   try {
-    const res = await api<{ words: Word[] }>(`/api/vocab/review?book_id=${cfg.bookId}&limit=20`);
+    cfg.checkupSize = size;
+    const res = await api<{ words: Word[]; decoys: Word[] }>(
+      `/api/vocab/checkup?book_id=${cfg.bookId}&size=${size}`,
+    );
     if (!res.words.length) {
       await showHome();
       return;
     }
-    state.decoys = [];
+    state.decoys = res.decoys || [];
+    // 条件を毎回そろえないと点が比較できない。4択・英→日・5秒に固定する。
+    // 制限なしだと思い出す時間を与えてしまい、「見た瞬間に意味が入るか」を測れない。
+    cfg.fmt = 'choice';
+    cfg.dir = 'ej';
+    cfg.tmr = CHECKUP_TIMER;
+    begin(res.words, 'checkup', null, null);
+  } catch (e) {
+    renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
+  }
+}
+
+async function startReview(): Promise<void> {
+  renderLoading();
+  try {
+    const res = await api<{ words: Word[]; decoys: Word[] }>(
+      `/api/vocab/review?book_id=${cfg.bookId}&limit=20`,
+    );
+    if (!res.words.length) {
+      await showHome();
+      return;
+    }
+    // 復習語が少ないと出題語だけでは4択が埋まらないので、サーバーのダミーを必ず使う
+    state.decoys = res.decoys || [];
     begin(res.words, 'review', null, null);
   } catch (e) {
     renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
@@ -965,8 +1120,9 @@ function onTimeout(): void {
       b.disabled = true;
       if (Number(b.dataset.id) === w.id) b.classList.add('ok');
     });
+  } else {
+    document.getElementById('vReveal')?.classList.remove('v-hide');
   }
-  document.getElementById('vReveal')?.classList.remove('v-hide');
   const acts = document.getElementById('vActs');
   if (acts) acts.innerHTML = '<p class="v-hint" style="text-align:center;width:100%">時間切れ</p>';
   setTimeout(() => mark(false), 1100);
@@ -986,12 +1142,14 @@ function renderQuestion(): void {
   <div class="v-reveal v-hide" id="vReveal">
     <div class="v-aword">${esc(askEn ? w.ja : w.en)}</div>
   </div>
+  <!-- 4択のときは答えを別に出さない。正解の選択肢が色で分かるうえ、
+       途中で要素が増えると選択肢の位置がずれて読みづらい -->
   <div class="v-opts${cfg.fmt === 'choice' ? '' : ' v-hide'}" id="vOpts"></div>
 </div>
 <div class="v-acts" id="vActs"></div>
 <button class="v-abort" id="vAbort">中断する（記録は残りません）</button>`;
 
-  app().innerHTML = shell('', '', body, `${state.idx + 1} / ${state.queue.length}`);
+  app().innerHTML = shell('', '', body, `${state.idx + 1} / ${state.queue.length}`, null);
   const prog = document.getElementById('vProg');
   if (prog) prog.style.width = `${(state.idx / state.queue.length) * 100}%`;
 
@@ -1026,6 +1184,17 @@ function reveal(): void {
   document.getElementById('vN')!.onclick = () => mark(false);
 }
 
+/**
+ * 4択の選択肢に出す短い語義。`；` の前だけを取る。
+ *
+ * 語義は平均13.9字あり、1900語中1462語が複数の語義を持つ。全部出すと選択肢が2行になり、
+ * 5秒の制限時間が「読む速さ」の勝負になってしまう。最初の語義だけなら平均7字に収まる。
+ */
+function shortJa(ja: string): string {
+  const i = ja.indexOf('；');
+  return i > 0 ? ja.slice(0, i) : ja;
+}
+
 function renderChoice(w: Word, askEn: boolean): void {
   // ダミーは同じテストで出す語から作る。足りないぶんだけサーバーが補ってくれている。
   const others = state.pool.filter((x) => x.id !== w.id);
@@ -1033,12 +1202,15 @@ function renderChoice(w: Word, askEn: boolean): void {
   const picked = shuffle(others.length >= 3 ? others : [...others, ...fallback]).slice(0, 3);
   const choices = shuffle([w, ...picked]);
 
+  // 短縮したせいで選択肢が同じ文言になったら、その回だけ全文に戻す
+  const labels = choices.map((c) => (askEn ? shortJa(c.ja) : c.en));
+  const dup = new Set(labels).size !== labels.length;
   const opts = document.getElementById('vOpts')!;
   opts.innerHTML = choices
     .map(
       (c, i) =>
         `<button class="v-opt" data-id="${c.id}"><span class="k">${i + 1}</span><span>${esc(
-          askEn ? c.ja : c.en,
+          dup ? (askEn ? c.ja : c.en) : labels[i],
         )}</span></button>`,
     )
     .join('');
@@ -1058,7 +1230,6 @@ function pick(btn: HTMLButtonElement, w: Word): void {
     if (Number(b.dataset.id) === w.id) b.classList.add('ok');
     else if (b === btn) b.classList.add('ng');
   });
-  document.getElementById('vReveal')!.classList.remove('v-hide');
   setTimeout(() => mark(right), right ? 450 : 1100);
 }
 
@@ -1119,7 +1290,7 @@ async function sendSession(): Promise<void> {
       }),
     });
     state.lastResult = res;
-    // 習得率が変わったのでホームのキャッシュを捨てる
+    // 進み具合とスコアが変わったのでホームのキャッシュを捨てる
     state.dashboard = null;
   } catch {
     state.lastResult = null;
@@ -1151,18 +1322,30 @@ function renderResult(sending: boolean): void {
   const ng = state.log.filter((x) => !x.ok);
   const r = state.lastResult;
 
-  const delta = r
+  if (state.kind === 'checkup') {
+    // 実力テストは点数がすべて。進み具合の変化は出さない（測っているものが違う）。
+    const pt = state.log.length ? Math.round((ok.length / state.log.length) * 100) : 0;
+    const body0 = `
+<div class="v-score-card">
+  <div class="hd"><em>実力テストのスコア</em></div>
+  <div class="val"><b>${pt}<i>%</i></b><u>${ok.length} / ${state.log.length} 問</u></div>
+  <p class="v-note">単語帳の<b>全範囲</b>からランダムに出しています。セクションテストの点とは別物です。</p>
+</div>
+${listBlock('できなかった単語', ng, false)}
+${listBlock('できた単語', ok, true)}
+<button class="v-ghost" id="vHome">ホームに戻る</button>`;
+    app().innerHTML = shell('', '実力テスト', body0, '', 'home');
+    bindNav();
+    document.getElementById('vHome')!.onclick = () => void showHome();
+    return;
+  }
+
+  // 出すのは「いま解いたセクションの定着率」だけ。単語帳全体の進み具合は出さない。
+  const delta = r && r.range_mastery
     ? `<div class="v-card">
-         <span class="lg">習得率</span>
-         <div class="v-delta">${pct(r.mastery.before)} → <b>${pct(r.mastery.after)}</b>
-           <span style="color:var(--fg3)">（習得済み ${r.mastery.mastered}/${r.mastery.total}語）</span></div>
-         ${
-           r.range_mastery
-             ? `<div class="v-delta" style="margin-top:6px;font-size:12.5px">この範囲 ${pct(
-                 r.range_mastery.before,
-               )} → ${pct(r.range_mastery.after)}</div>`
-             : ''
-         }
+         <span class="lg">このセクションの定着率</span>
+         <div class="v-delta">${pct(r.range_mastery.before)} → <b>${pct(r.range_mastery.after)}</b>
+           <span style="color:var(--fg3)">（${r.range_mastery.mastered}/${r.range_mastery.total}語）</span></div>
        </div>`
     : sending
       ? '<p class="v-hint">記録を保存しています...</p>'
@@ -1186,7 +1369,8 @@ ${listBlock('できた', ok, true)}
 ${ng.length ? '<button class="v-go" id="vAgain">できなかった単語だけ、もう一度</button>' : ''}
 <button class="v-ghost" id="vHome">ホームに戻る</button>`;
 
-  app().innerHTML = shell('', '', body);
+  app().innerHTML = shell('', '', body, '', 'test');
+  bindNav();
   const prog = document.getElementById('vProg');
   if (prog) prog.style.width = '100%';
 
@@ -1261,6 +1445,8 @@ async function showRecords(): Promise<void> {
   };
   try {
     rec = await api(`/api/vocab/records?book_id=${cfg.bookId}`);
+    // 推移と累計はダッシュボード側の集計。ホームから外したぶんここで見せる。
+    if (!state.dashboard) state.dashboard = await api<Dashboard>('/api/vocab/dashboard');
   } catch (e) {
     renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
     return;
@@ -1331,15 +1517,42 @@ async function showRecords(): Promise<void> {
        </div>`
     : '';
 
+  const d = state.dashboard;
+  const trend =
+    d && d.recent.enough
+      ? `<div class="v-card">
+           <span class="lg">セクションテストの正答率</span>
+           ${sparkline(d.recent.sessions)}
+           <div class="v-mlegend">直近 ${d.recent.sessions.length} 回　最新 ${
+             d.recent.latest_rate === null ? '—' : pct(d.recent.latest_rate)
+           }</div>
+         </div>`
+      : d
+        ? `<div class="v-card"><span class="lg">セクションテストの正答率</span>
+             <p class="v-hint" style="margin:0">あと ${d.recent.needed} 回でグラフが出ます。</p>
+           </div>`
+        : '';
+
+  const totals = d
+    ? `<div class="v-stats">
+         <div class="v-stat"><b>${d.totals.answers}</b><span>解いた問題</span></div>
+         <div class="v-stat"><b>${d.totals.days}</b><span>学習日数</span></div>
+         <div class="v-stat"><b>${d.totals.sessions}</b><span>実施回数</span></div>
+       </div>`
+    : '';
+
   const body =
     (rec.sessions.length ? '' : '<p class="v-empty">まだ記録がありません。</p>') +
-    history +
+    trend +
     weak +
     sections +
     (rec.sessions.length ? formats : '') +
+    history +
+    totals +
     '<button class="v-ghost" id="vHome">ホームに戻る</button>';
 
-  app().innerHTML = shell('', '記録', body);
+  app().innerHTML = shell('', 'テスト結果', body, '', 'records');
+  bindNav();
   document.getElementById('vHome')!.onclick = () => void showHome();
 }
 

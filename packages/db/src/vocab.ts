@@ -69,6 +69,16 @@ export interface BookSummary {
   sections: BookSection[];
 }
 
+export interface BlockMastery {
+  block: number;
+  from: number;
+  to: number;
+  total: number;
+  mastered: number;
+  unmastered: number;
+  untried: number;
+}
+
 export interface Mastery {
   total: number;
   mastered: number;
@@ -87,6 +97,19 @@ export interface WeakWord {
 }
 
 /**
+ * 成績の集計から外すセッション種別。
+ *
+ * `retry`（結果画面の「できなかった単語だけ、もう一度」）は、答えを見た直後の再挑戦。
+ * ほぼ必ず正解するので、**実力の測定にならない**。
+ *   - 正答率の推移に入れると100%が並んでグラフが意味を失う
+ *   - 習得判定に入れると「答えを見た10秒後に正解した語」が習得済みになる
+ * 記録には残す（テスト履歴と累計解答数）が、集計からは全部外す。
+ *
+ * `review`（後日やる復習テスト）は別セッションの本番なので、集計に入れる。
+ */
+const EXCLUDE_RETRY = `s2.kind <> 'retry'`;
+
+/**
  * 「その語の直近の解答」を1語1行で返す共通の CTE。
  *
  * choice を recall より優先する。ORDER BY の第1キー `(format = 'choice') DESC` が
@@ -95,16 +118,17 @@ export interface WeakWord {
  */
 const LATEST_ANSWER_CTE = `
   WITH ranked AS (
-    SELECT a.word_id, a.ok,
+    SELECT a.word_id, a.ok, a.answered_at,
            ROW_NUMBER() OVER (
              PARTITION BY a.word_id
              ORDER BY (a.format = 'choice') DESC, a.answered_at DESC, a.id DESC
            ) AS rn
     FROM vocab_answers a
     JOIN vocab_words w2 ON w2.id = a.word_id AND w2.book_id = ?2
+    JOIN vocab_sessions s2 ON s2.id = a.session_id AND ${EXCLUDE_RETRY}
     WHERE a.friend_id = ?1
   ),
-  latest AS (SELECT word_id, ok FROM ranked WHERE rn = 1)
+  latest AS (SELECT word_id, ok, answered_at FROM ranked WHERE rn = 1)
 `;
 
 // ── 単語帳 ──────────────────────────────────────────────────────────────────
@@ -195,6 +219,187 @@ export async function getVocabWords(
   // 並びは呼び出し側（LIFF）が order に従って決めるので、ここでは番号順に戻しておく。
   pool.sort((a, b) => a.no - b.no);
   return pool;
+}
+
+/**
+ * 定着テスト（`kind='checkup'`）の出題。
+ *
+ * **単語帳の全範囲からランダムに引く。** 範囲指定もせず、やった語に限定もしない。
+ * そうすることで、20問の正答率が「いまこの単語帳の何割を答えられるか」の推定値になる。
+ * 特定の語を回しても次に何が出るか分からないので、点を上げる方法が
+ * 「全体を本当に覚えること」しかなくなる。
+ *
+ * **抽出は100語ブロックごとの層化抽出**。全セクションから均等に引くので、
+ * 「勉強した範囲から何問引かれるか」の運が消える。
+ *
+ * 注意：4択なので知らない語も25%当たる。素点をそのまま「何％覚えた」とは読めない
+ * （実力の目安は `(素点 - 25) / 75`）。
+ */
+export async function getCheckupWords(
+  db: D1Database,
+  bookId: number,
+  limit = 20,
+  block = 100,
+): Promise<VocabWord[]> {
+  // 100語ブロックごとに均等に割り当てる。単純ランダムだと「勉強した範囲から
+  // 何問引かれるか」自体が運になり、同じ実力でも点が25〜65点まで振れる。
+  const agg = await db
+    .prepare(`SELECT COALESCE(MAX(no), 0) AS max_no FROM vocab_words WHERE book_id = ?`)
+    .bind(bookId)
+    .first<{ max_no: number }>();
+  const maxNo = agg?.max_no ?? 0;
+  if (!maxNo) return [];
+
+  const blocks = Math.ceil(maxNo / block);
+  const per = Math.floor(limit / blocks);
+  const rest = limit - per * blocks;
+  // 端数はブロックをランダムに選んで1問ずつ足す（毎回同じブロックが得しないように）
+  const bonus = new Set(shuffle([...Array(blocks).keys()]).slice(0, rest));
+
+  const picked: VocabWord[] = [];
+  for (let b = 0; b < blocks; b++) {
+    const n = per + (bonus.has(b) ? 1 : 0);
+    if (n <= 0) continue;
+    const rows = await db
+      .prepare(
+        `SELECT id, book_id, no, en, ja, section FROM vocab_words
+         WHERE book_id = ? AND no BETWEEN ? AND ?
+         ORDER BY RANDOM() LIMIT ?`,
+      )
+      .bind(bookId, b * block + 1, (b + 1) * block, n)
+      .all<VocabWord>();
+    picked.push(...rows.results);
+  }
+  return picked.sort((a, b) => a.no - b.no);
+}
+
+export interface CheckupPoint {
+  at: string;
+  total: number;
+  correct: number;
+  score: number;
+}
+
+/**
+ * 表示に使うスコア。**直近10回の加重平均（新しい回ほど重い）。**
+ *
+ * 1回ぶんだと20問で標準偏差9.4ポイントあり、伸びたのか運が良かったのか区別できない。
+ * 単純に10回まとめると σ2.9 まで下がるが、実力が上がっても数字が5回ぶん遅れて追従する。
+ * 加重（decay 0.8）にすると σ3.4 のまま追従も保てる。実測でこの組み合わせが一番良かった。
+ *
+ * 分母は問題数なので、20問・30問・50問が混ざっても正しく重み付けされる。
+ */
+export function poolScore(
+  points: CheckupPoint[],
+  n = 10,
+  decay = 0.8,
+): { score: number; correct: number; total: number; sessions: number } | null {
+  const recent = points.slice(-n);
+  if (!recent.length) return null;
+
+  // 新しい回ほど重い。decay=0.8 だと、実効的におよそ4回分の重みになる。
+  let num = 0;
+  let den = 0;
+  recent.forEach((p, i) => {
+    const w = Math.pow(decay, recent.length - 1 - i);
+    num += p.correct * w;
+    den += p.total * w;
+  });
+  return {
+    score: den ? num / den : 0,
+    correct: recent.reduce((a, b) => a + b.correct, 0),
+    total: recent.reduce((a, b) => a + b.total, 0),
+    sessions: recent.length,
+  };
+}
+
+/** 定着スコアの履歴。古い→新しい。 */
+export async function getCheckupHistory(
+  db: D1Database,
+  friendId: string,
+  bookId: number,
+  limit = 20,
+): Promise<CheckupPoint[]> {
+  const rows = await db
+    .prepare(
+      `SELECT finished_at AS at, total, correct FROM vocab_sessions
+       WHERE friend_id = ? AND book_id = ? AND kind = 'checkup'
+       ORDER BY finished_at DESC, id DESC LIMIT ?`,
+    )
+    .bind(friendId, bookId, limit)
+    .all<{ at: string; total: number; correct: number }>();
+  return rows.results
+    .map((r) => ({ ...r, score: r.total > 0 ? r.correct / r.total : 0 }))
+    .reverse();
+}
+
+/**
+ * セクションテストの出題を組み立てる。
+ *
+ * 範囲から毎回ランダムに引くと、2回目以降が「もう一度くじを引く」だけになり、
+ * 間違えた語も未挑戦の語も優先されない。結果としてセクションが埋まらない。
+ * そこで状態ごとに優先度をつけて枠を配る。
+ *
+ *   1. 復習が必要（直近で間違えた）… **最大5問まで**
+ *   2. 未挑戦（まだ出していない）  … 残り全部
+ *   3. 習得済み（確認用）          … それでも埋まらない分だけ
+ *
+ * 復習に上限を置くのが肝。全部を間違えた語で埋めると、いつまでもカバーが進まず
+ * 同じ語を延々やることになる。逆に未挑戦だけだと取りこぼしが放置される。
+ */
+export const SECTION_REVIEW_QUOTA = 5;
+
+export async function getSectionTestWords(
+  db: D1Database,
+  friendId: string,
+  bookId: number,
+  from: number,
+  to: number,
+  limit: number,
+): Promise<VocabWord[]> {
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+
+  const rows = await db
+    .prepare(
+      `${LATEST_ANSWER_CTE}
+       SELECT w.id, w.book_id, w.no, w.en, w.ja, w.section,
+              CASE WHEN l.ok IS NULL THEN 2 WHEN l.ok = 0 THEN 1 ELSE 3 END AS st,
+              l.answered_at AS at
+       FROM vocab_words w
+       LEFT JOIN latest l ON l.word_id = w.id
+       WHERE w.book_id = ?2 AND w.no BETWEEN ?3 AND ?4
+       ORDER BY w.no ASC`,
+    )
+    .bind(friendId, bookId, lo, hi)
+    .all<VocabWord & { st: number; at: string | null }>();
+
+  const all = rows.results;
+  if (all.length <= limit) return all;
+
+  const byOldest = (a: { at: string | null }, b: { at: string | null }) =>
+    (a.at ?? '').localeCompare(b.at ?? '');
+
+  const wrong = all.filter((w) => w.st === 1).sort(byOldest);
+  const untried = shuffle(all.filter((w) => w.st === 2));
+  const done = all.filter((w) => w.st === 3).sort(byOldest);
+
+  const picked: typeof all = [];
+  const take = (src: typeof all, n: number) => {
+    for (const w of src) {
+      if (picked.length >= limit || n <= 0) break;
+      if (picked.includes(w)) continue;
+      picked.push(w);
+      n--;
+    }
+  };
+
+  take(wrong, Math.min(SECTION_REVIEW_QUOTA, limit));
+  take(untried, limit - picked.length);
+  take(done, limit - picked.length);
+  take(wrong, limit - picked.length); // それでも足りなければ復習から追加
+
+  return picked.sort((a, b) => a.no - b.no);
 }
 
 /** 4択のダミー選択肢。出題語と重複しない範囲外の語から拾う。 */
@@ -302,6 +507,9 @@ export async function getMastery(
  *
  * 期間の窓は設けない。正解すれば直近の解答が変わって自動的に外れるので、
  * 古い記録が溜まり続ける問題は起きない。
+ *
+ * **並びは「最後に間違えてから古い順」。** 番号順にすると、若い番号の苦手な語が
+ * 先頭に居座り続けて、後ろの復習語が永遠に出てこない。
  */
 export async function getReviewWords(
   db: D1Database,
@@ -316,7 +524,7 @@ export async function getReviewWords(
        FROM latest l
        JOIN vocab_words w ON w.id = l.word_id
        WHERE l.ok = 0
-       ORDER BY w.no ASC
+       ORDER BY l.answered_at ASC, w.no ASC
        LIMIT ?3`,
     )
     .bind(friendId, bookId, limit)
@@ -353,6 +561,7 @@ export async function getWeakWords(
               COUNT(*) AS asked
        FROM vocab_answers a
        JOIN vocab_words w ON w.id = a.word_id
+       JOIN vocab_sessions s2 ON s2.id = a.session_id AND ${EXCLUDE_RETRY}
        WHERE a.friend_id = ?${bookClause}
        GROUP BY w.id
        HAVING asked >= 2 AND CAST(wrong AS REAL) / asked >= 0.5
@@ -362,6 +571,45 @@ export async function getWeakWords(
     .bind(...binds)
     .all<WeakWord>();
   return rows.results;
+}
+
+/**
+ * 100語ブロックごとの状態。ホームの「進み具合」と記録画面の「苦手セクション」に使う。
+ *
+ * ブロックを100語にしているのは、生徒が範囲を選ぶ単位（スライダーの1目盛り）と
+ * 同じだから。10語刻みだと1900語の単語帳で190本並び、どこを直せばいいか分からない。
+ */
+export async function getBlockMastery(
+  db: D1Database,
+  friendId: string,
+  bookId: number,
+  size = 100,
+): Promise<BlockMastery[]> {
+  const rows = await db
+    .prepare(
+      `${LATEST_ANSWER_CTE}
+       SELECT ((w.no - 1) / ${size}) AS block,
+              COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN l.ok = 1 THEN 1 ELSE 0 END), 0) AS mastered,
+              COALESCE(SUM(CASE WHEN l.ok = 0 THEN 1 ELSE 0 END), 0) AS unmastered
+       FROM vocab_words w
+       LEFT JOIN latest l ON l.word_id = w.id
+       WHERE w.book_id = ?2
+       GROUP BY block
+       ORDER BY block ASC`,
+    )
+    .bind(friendId, bookId)
+    .all<{ block: number; total: number; mastered: number; unmastered: number }>();
+
+  return rows.results.map((r) => ({
+    block: r.block,
+    from: r.block * size + 1,
+    to: r.block * size + size,
+    total: r.total,
+    mastered: r.mastered,
+    unmastered: r.unmastered,
+    untried: Math.max(0, r.total - r.mastered - r.unmastered),
+  }));
 }
 
 // ── ダッシュボード ──────────────────────────────────────────────────────────
@@ -379,6 +627,12 @@ export interface DashboardBook extends Mastery {
   name: string;
   review_count: number;
   last_played_at: string | null;
+  /** 100語ごとの進み具合。ホームの帯に使う。 */
+  blocks: BlockMastery[];
+  /** 実力テストの履歴（古い→新しい）。 */
+  checkups: CheckupPoint[];
+  /** 表示用のスコア。直近3回を合算したもの。 */
+  checkup_score: { score: number; correct: number; total: number; sessions: number } | null;
 }
 
 export interface VocabDashboard {
@@ -416,6 +670,7 @@ export async function getVocabDashboard(
       )
       .bind(friendId, b.id)
       .first<{ at: string | null }>();
+    const checkups = await getCheckupHistory(db, friendId, b.id, 20);
 
     dashboardBooks.push({
       id: b.id,
@@ -423,6 +678,9 @@ export async function getVocabDashboard(
       ...mastery,
       review_count: review?.c ?? 0,
       last_played_at: last?.at ?? null,
+      blocks: await getBlockMastery(db, friendId, b.id),
+      checkups: checkups,
+      checkup_score: poolScore(checkups),
     });
   }
 
@@ -437,7 +695,7 @@ export async function getVocabDashboard(
   const recentRows = await db
     .prepare(
       `SELECT finished_at AS at, total, correct, kind
-       FROM vocab_sessions WHERE friend_id = ?
+       FROM vocab_sessions WHERE friend_id = ? AND kind NOT IN ('retry', 'checkup')
        ORDER BY finished_at DESC, id DESC LIMIT 10`,
     )
     .bind(friendId)
@@ -508,8 +766,10 @@ export interface FormatStat {
   timeout_rate: number | null;
 }
 
+/** 苦手セクションのブロック幅。範囲指定の単位（100語）と揃える。 */
+const SECTION_BLOCK = 100;
 /** そのブロックを表示するのに最低限必要な解答数。これ未満は描かない。 */
-const MIN_ANSWERS_PER_BLOCK = 5;
+const MIN_ANSWERS_PER_BLOCK = 10;
 
 export async function getVocabRecords(
   db: D1Database,
@@ -529,15 +789,16 @@ export async function getVocabRecords(
     .bind(friendId, bookId)
     .all<VocabSession>();
 
-  // 10語ブロックごとの正答率。基準未満のブロックは返さない
+  // 100語ブロックごとの正答率。基準未満のブロックは返さない
   // （薄く描くと「やったのにできていない」と誤読されるため、そもそも描かせない）。
   const blocks = await db
     .prepare(
-      `SELECT ((w.no - 1) / 10) AS block,
+      `SELECT ((w.no - 1) / ${SECTION_BLOCK}) AS block,
               COUNT(*) AS asked,
               SUM(CASE WHEN a.ok = 1 THEN 1 ELSE 0 END) AS correct
        FROM vocab_answers a
        JOIN vocab_words w ON w.id = a.word_id
+       JOIN vocab_sessions s2 ON s2.id = a.session_id AND ${EXCLUDE_RETRY}
        WHERE a.friend_id = ? AND w.book_id = ?
        GROUP BY block
        HAVING asked >= ${MIN_ANSWERS_PER_BLOCK}
@@ -548,8 +809,8 @@ export async function getVocabRecords(
 
   const sections: SectionStat[] = blocks.results.map((b) => ({
     block: b.block,
-    from: b.block * 10 + 1,
-    to: b.block * 10 + 10,
+    from: b.block * SECTION_BLOCK + 1,
+    to: b.block * SECTION_BLOCK + SECTION_BLOCK,
     asked: b.asked,
     correct: b.correct,
     rate: b.asked > 0 ? b.correct / b.asked : 0,
@@ -573,7 +834,7 @@ export async function getVocabRecords(
        FROM vocab_answers a
        JOIN vocab_sessions s ON s.id = a.session_id
        JOIN vocab_words w ON w.id = a.word_id
-       WHERE a.friend_id = ? AND w.book_id = ?`,
+       WHERE a.friend_id = ? AND w.book_id = ? AND s.kind <> 'retry'`,
     )
     .bind(friendId, bookId)
     .first<Record<string, number | null>>();
@@ -815,6 +1076,9 @@ export interface VocabStudentRow {
   sessions: number;
   answers: number;
   latest_rate: number | null;
+  /** 実力テストのスコア（直近10回の加重平均）。未受験なら null。 */
+  checkup_score: number | null;
+  checkup_sessions: number;
   /** 主に使っている単語帳での状態。一覧の時点で「あと何語あるか」まで見せる。 */
   book_name: string | null;
   total: number;
@@ -865,7 +1129,8 @@ export async function getVocabStudents(
     const latest = await db
       .prepare(
         `SELECT total, correct FROM vocab_sessions
-         WHERE friend_id = ? ORDER BY finished_at DESC, id DESC LIMIT 1`,
+         WHERE friend_id = ? AND kind <> 'retry'
+         ORDER BY finished_at DESC, id DESC LIMIT 1`,
       )
       .bind(r.friend_id)
       .first<{ total: number; correct: number }>();
@@ -890,9 +1155,15 @@ export async function getVocabStudents(
       mastery = await getMastery(db, r.friend_id, focusId);
     }
 
+    // 実力テストのスコア。講師が最初に見る数字なので一覧に出す。
+    const checkups = focusId ? await getCheckupHistory(db, r.friend_id, focusId, 10) : [];
+    const pooled = poolScore(checkups);
+
     out.push({
       ...r,
       latest_rate: latest && latest.total > 0 ? latest.correct / latest.total : null,
+      checkup_score: pooled ? pooled.score : null,
+      checkup_sessions: checkups.length,
       book_name: bookName,
       total: mastery.total,
       mastered: mastery.mastered,
