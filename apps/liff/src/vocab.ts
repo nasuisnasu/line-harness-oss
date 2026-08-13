@@ -118,8 +118,6 @@ const cfg = {
   from: 1,
   to: 100,
   lim: 20,
-  /** 出題数「全部」。範囲内の全単語を出す（サーバー上限まで）。 */
-  limAll: false,
   fmt: 'choice' as 'choice' | 'recall',
   dir: 'ej' as 'ej' | 'je',
   /** 既定はランダム。番号順だと毎回おなじ並びで、順番で覚えてしまう。 */
@@ -752,7 +750,6 @@ function resetRangeForBook(): void {
   if (cfg.to > max) cfg.to = Math.ceil(max / BLOCK) * BLOCK;
   cfg.to = Math.min(cfg.to, Math.ceil(max / BLOCK) * BLOCK);
   cfg.lim = 20;
-  cfg.limAll = false;
 }
 
 // ── ホーム ──────────────────────────────────────────────────────────────────
@@ -888,7 +885,7 @@ function renderSetup(): void {
     .join('');
 
   const body = `
-<p class="v-sub">セクションを選ぶと、その範囲のテストが始まります。${cfg.lim}問・${
+<p class="v-sub">セクションを選ぶと、その範囲のテストが始まります。${Math.min(cfg.lim, BLOCK)}問・${
     cfg.fmt === 'choice' ? '4択' : '意味を答える'
   }・${cfg.dir === 'ej' ? '英→日' : '日→英'}。</p>
 ${sections || '<p class="v-empty">セクションがありません。</p>'}
@@ -904,10 +901,8 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
       <input type="range" id="vToSl" min="0" max="${nBlocks - 1}" step="1" value="${toBlk}"></div>
 
     <p class="v-hint" style="margin:16px 0 6px">出題数</p>
-    <div class="v-row">
-      ${[10, 20, 30, 50, 100].map((n) => chip('lim', String(n), `${n}問`, !cfg.limAll && cfg.lim === n)).join('')}
-      ${chip('lim', 'all', '全部', cfg.limAll)}
-    </div>
+    <div class="v-row" id="vLimRow"></div>
+    <p class="v-hint" id="vLimNote" style="margin:6px 0 0"></p>
 
     <p class="v-hint" style="margin:16px 0 6px">形式</p>
     <div class="v-row">
@@ -940,18 +935,57 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
     el.onclick = () => {
       cfg.from = Number(el.dataset.from);
       cfg.to = Number(el.dataset.to);
+      cfg.lim = Math.min(cfg.lim, cfg.to - cfg.from + 1, MAX_QUESTIONS);
       void startNormal();
     };
   });
 
   const fromSl = document.getElementById('vFromSl') as HTMLInputElement;
   const toSl = document.getElementById('vToSl') as HTMLInputElement;
+
+  /**
+   * 出題数の選択肢。範囲に入っている語数を超える数は出さない。
+   *
+   * 以前は「全部」という選択肢があったが、範囲によって20問にも500問にもなり、
+   * 押すまで何問か分からなかった。数字で出して MAX_QUESTIONS で頭打ちにする。
+   */
+  const paintLimits = (span: number) => {
+    const opts = [10, 20, 30, 50, 100, 200, 500].filter((n) => n <= Math.min(span, MAX_QUESTIONS));
+    const whole = Math.min(span, MAX_QUESTIONS);
+    if (!opts.includes(whole)) opts.push(whole);
+    if (!opts.includes(cfg.lim)) cfg.lim = opts[Math.min(1, opts.length - 1)];
+
+    const row = document.getElementById('vLimRow');
+    if (!row) return;
+    row.innerHTML = opts
+      .map(
+        (n) =>
+          `<button class="v-chip${cfg.lim === n ? ' on' : ''}" data-lim="${n}">${n}問${
+            n === whole && span > n ? '' : n === whole ? '（全部）' : ''
+          }</button>`,
+      )
+      .join('');
+    row.querySelectorAll<HTMLElement>('[data-lim]').forEach((b) => {
+      b.onclick = () => {
+        cfg.lim = Number(b.dataset.lim);
+        paint();
+      };
+    });
+    const note = document.getElementById('vLimNote');
+    if (note) {
+      note.textContent =
+        span > MAX_QUESTIONS
+          ? `この範囲は ${span} 語あります。1回のテストは ${MAX_QUESTIONS} 問までです。`
+          : '';
+    }
+  };
+
   const paint = () => {
     cfg.from = fromBlk * BLOCK + 1;
     cfg.to = Math.min((toBlk + 1) * BLOCK, book.max_no);
     const span = cfg.to - cfg.from + 1;
-    if (cfg.limAll) cfg.lim = Math.min(span, MAX_QUESTIONS);
-    const shown = Math.min(cfg.lim, span);
+    paintLimits(span);
+    const shown = Math.min(cfg.lim, span, MAX_QUESTIONS);
     document.getElementById('vRngLabel')!.textContent = `${cfg.from} 〜 ${cfg.to}`;
     document.getElementById('vRngCount')!.textContent = `この範囲に ${span} 語（${shown}問を出題）`;
   };
@@ -972,11 +1006,7 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
       document.querySelectorAll<HTMLElement>(`.v-chip[data-g="${g}"]`).forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       if (g === 'tmr') cfg.tmr = Number(b.dataset.v);
-      else if (g === 'lim') {
-        cfg.limAll = b.dataset.v === 'all';
-        if (!cfg.limAll) cfg.lim = Number(b.dataset.v);
-        paint();
-      } else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
+      else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
       else if (g === 'dir') cfg.dir = b.dataset.v as 'ej' | 'je';
       else if (g === 'ord') cfg.ord = b.dataset.v as 'seq' | 'rnd';
     };
