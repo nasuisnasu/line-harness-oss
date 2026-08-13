@@ -410,16 +410,23 @@ export async function getVocabDecoys(
   count: number,
 ): Promise<Pick<VocabWord, 'id' | 'en' | 'ja'>[]> {
   if (count <= 0) return [];
-  const placeholders = excludeIds.length ? excludeIds.map(() => '?').join(',') : 'NULL';
+
+  // **除外リストを SQL に渡さないこと。**
+  // D1 は1クエリのバインド変数が100個までで、出題語を全部 NOT IN に入れると
+  // 500問のテスト（範囲1-1200で「全部」など）で502個になり、クエリごと失敗する。
+  // 画面には「通信に失敗しました」としか出ないので、原因が分かりにくい。
+  // 多めに引いてから JS 側で除外する。バインドは常に2個で済む。
   const rows = await db
     .prepare(
       `SELECT id, en, ja FROM vocab_words
-       WHERE book_id = ? AND id NOT IN (${placeholders})
+       WHERE book_id = ?
        ORDER BY RANDOM() LIMIT ?`,
     )
-    .bind(bookId, ...excludeIds, count)
+    .bind(bookId, count + 40)
     .all<Pick<VocabWord, 'id' | 'en' | 'ja'>>();
-  return rows.results;
+
+  const exclude = new Set(excludeIds);
+  return rows.results.filter((w) => !exclude.has(w.id)).slice(0, count);
 }
 
 // ── 使う単語帳の選択 ────────────────────────────────────────────────────────

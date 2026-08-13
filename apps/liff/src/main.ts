@@ -22,6 +22,7 @@ import { initEijaku } from './eijaku.js';
 import { initSchedule } from './schedule.js';
 import { initVocab } from './vocab.js';
 import { initMaterials } from './materials.js';
+import { initSubmitMaterial } from './submit-material.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -415,6 +416,8 @@ async function main() {
       await initVocab();
     } else if (page === 'materials') {
       await initMaterials();
+    } else if (page === 'submit') {
+      await initSubmitMaterial();
     } else if (page === 'schedule') {
       const lineAccountId = _snapshotParam('lineAccountId');
       await initSchedule(lineAccountId);

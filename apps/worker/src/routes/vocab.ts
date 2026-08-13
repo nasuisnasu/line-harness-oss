@@ -162,22 +162,31 @@ vocab.get('/api/vocab/words', async (c) => {
     return c.json({ success: false, error: `1回に取得できるのは${MAX_WORDS_PER_REQUEST}語までです` }, 400);
   }
 
-  // 状態（未挑戦／復習が必要／習得済み）を見て枠を配る。毎回ランダムに引くと
-  // 2回目以降がただの引き直しになり、セクションが埋まらない。
-  const words = await getSectionTestWords(c.env.DB, gate.friend.id, bookId, from, to, limit);
-  if (!words.length) {
-    return c.json({ success: true, words: [], decoys: [] });
+  try {
+    // 状態（未挑戦／復習が必要／習得済み）を見て枠を配る。毎回ランダムに引くと
+    // 2回目以降がただの引き直しになり、セクションが埋まらない。
+    const words = await getSectionTestWords(c.env.DB, gate.friend.id, bookId, from, to, limit);
+    if (!words.length) {
+      return c.json({ success: true, words: [], decoys: [] });
+    }
+
+    // 4択のダミー。出題語だけで作ると選択肢が足りない場面があるので、必ず補充分を渡す。
+    const decoys = await getVocabDecoys(
+      c.env.DB,
+      bookId,
+      words.map((w) => w.id),
+      8,
+    );
+
+    return c.json({ success: true, words, decoys });
+  } catch (e) {
+    // 画面には「通信に失敗しました」としか出ないので、原因はここに残す
+    console.error(
+      `[vocab/words] friend=${gate.friend.id} book=${bookId} range=${from}-${to} limit=${limit}`,
+      e,
+    );
+    return c.json({ success: false, error: '問題の準備に失敗しました。時間をおいて試してください' }, 500);
   }
-
-  // 4択のダミー。出題語だけで作ると選択肢が足りない場面があるので、必ず補充分を渡す。
-  const decoys = await getVocabDecoys(
-    c.env.DB,
-    bookId,
-    words.map((w) => w.id),
-    8,
-  );
-
-  return c.json({ success: true, words, decoys });
 });
 
 /** 使う単語帳を決める／あとから切り替える。 */

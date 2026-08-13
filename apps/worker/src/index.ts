@@ -43,6 +43,7 @@ import { businessCalendar } from './routes/business-calendar.js';
 import { pay } from './routes/pay.js';
 import { vocab } from './routes/vocab.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
+import { materialSubmissions } from './routes/material-submissions.js';
 
 export type Env = {
   Bindings: {
@@ -116,6 +117,7 @@ app.route('/', businessCalendar);
 app.route('/', pay);
 app.route('/', vocab);
 app.route('/', eijakuMaterials);
+app.route('/', materialSubmissions);
 
 // 404 fallback
 app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));

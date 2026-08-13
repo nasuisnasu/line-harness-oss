@@ -31,7 +31,7 @@ type Gate = { ok: true; friend: Friend } | { ok: false; status: 401 | 403 | 503 
  * env が未設定のときは**通さない**（fail closed）。設定漏れのまま deploy して
  * 全員に開いてしまうほうが、初回に 503 で気づくよりずっと悪い。
  */
-async function requireStudent(c: {
+export async function requireStudent(c: {
   req: { header(name: string): string | undefined };
   env: Env['Bindings'];
 }): Promise<Gate> {
@@ -77,7 +77,7 @@ async function requireStudent(c: {
 }
 
 /** 403 のレスポンスに内部事情を書かない（生徒の有無や教材の中身を漏らさない）。 */
-function denied(status: 401 | 403 | 503) {
+export function denied(status: 401 | 403 | 503) {
   return status === 503
     ? ({ body: { success: false, error: 'サーバーの設定が完了していません' }, status } as const)
     : ({ body: { success: false, error: '受講生の方のみご利用いただけます' }, status } as const);

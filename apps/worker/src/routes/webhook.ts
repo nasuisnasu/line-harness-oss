@@ -23,6 +23,7 @@ import {
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage, applyVars, applyTrackingLinks } from '../services/step-delivery.js';
 import { notifyScenarioEnrolled } from '../services/discord-notify.js';
+import { ingestTalkAttachment } from '../services/material-intake.js';
 import type { Env } from '../index.js';
 
 const webhook = new Hono<Env>();
@@ -84,7 +85,19 @@ webhook.post('/webhook/:accountId', async (c) => {
 
   const valid = await verifySignature(account.channel_secret, rawBody, signature);
   if (!valid) {
-    console.error('Invalid LINE signature for account', accountId);
+    // 署名が合わない原因はほぼ2つ。シークレットが違うか、**別チャネルがこのURLを叩いている**か。
+    // どちらなのかは destination（送信元ボットのuserId）を見ないと切り分けられない。
+    // ここを黙って 200 で返すだけにすると、設定ミスが永久に見つからない。
+    let destination = '(読めず)';
+    try {
+      destination = (JSON.parse(rawBody) as { destination?: string }).destination ?? '(無し)';
+    } catch {
+      /* 本文が壊れているなら、それ自体が手がかりになる */
+    }
+    console.error(
+      `Invalid LINE signature for account ${accountId} (${account.name}) ` +
+        `destination=${destination} sig=${signature.slice(0, 8)}… bodyLen=${rawBody.length}`,
+    );
     return c.json({ status: 'ok' }, 200);
   }
 
@@ -97,10 +110,19 @@ webhook.post('/webhook/:accountId', async (c) => {
 
   const lineClient = new LineClient(account.channel_access_token);
   const discordWebhookUrl = c.env.DISCORD_WEBHOOK_URL;
+  const uploads = c.env.UPLOADS;
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, account.channel_access_token, accountId, discordWebhookUrl);
+        await handleEvent(
+          db,
+          lineClient,
+          event,
+          account.channel_access_token,
+          accountId,
+          discordWebhookUrl,
+          uploads,
+        );
       } catch (err) {
         console.error('Error handling webhook event for account', accountId, err);
       }
@@ -118,6 +140,8 @@ async function handleEvent(
   lineAccessToken: string,
   lineAccountId?: string,
   discordWebhookUrl?: string,
+  /** 教材素材の保存先。未設定の環境（テスト等）では取り込みを黙って飛ばす。 */
+  uploads?: R2Bucket,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -301,7 +325,13 @@ async function handleEvent(
     const friend = await getFriendByLineUserId(db, userId, lineAccountId ?? null);
     if (!friend) return;
 
-    const m = event.message as { type: string; packageId?: string; stickerId?: string; id?: string };
+    const m = event.message as {
+      type: string;
+      packageId?: string;
+      stickerId?: string;
+      id?: string;
+      fileName?: string;
+    };
     const placeholder =
       m.type === 'sticker'
         ? `[スタンプ] pkg=${m.packageId ?? '?'} id=${m.stickerId ?? '?'}`
@@ -325,6 +355,21 @@ async function handleEvent(
       .bind(crypto.randomUUID(), friend.id, m.type, placeholder, now)
       .run();
     await upsertChatOnMessage(db, friend.id);
+
+    // 教材の素材は普通のトークで飛んでくる。ここまでだと「[画像]」という文字が
+    // 残るだけで実体が消えるので、写真とファイルは中身を取って R2 に置いておく。
+    // 教材かどうかの選別はしない（人が /kyozai-inbox で決める）。
+    if ((m.type === 'image' || m.type === 'file') && m.id && uploads) {
+      await ingestTalkAttachment({
+        db,
+        uploads,
+        accessToken: lineAccessToken,
+        friend,
+        messageId: m.id,
+        fileName: m.fileName,
+        discordWebhookUrl,
+      });
+    }
     return;
   }
 
