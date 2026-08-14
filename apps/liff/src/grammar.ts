@@ -639,37 +639,31 @@ async function showHome(): Promise<void> {
       )
       .join('')}</div>`;
 
-  const body = !hasHistory
-    ? // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
-      catBar() +
+  // 分岐は2つだけにする。以前は3分岐で、初回の枝にだけ総合演習と復習を足し忘れていた。
+  // 枝ごとにボタンを並べ直す作りが原因なので、共通部分は1か所にまとめる。
+  const mainActions =
+    '<button class="v-ghost" id="gStart">単元を選んで解く</button>' + mixedBlock + reviewBlock;
+
+  const body = ready
+    ? catBar() +
+      checkupCard(book) +
+      '<button class="v-go" id="gCheckup">総復習テストを受ける</button>' +
+      sizeChips +
+      mainActions +
+      '<button class="v-switch" id="gSwitch">問題集を切り替える</button>'
+    : catBar() +
       `<div class="v-lead">
          <div class="cap">${esc(book.name)}</div>
-         <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは1単元やってみましょう</div>
-       </div>
-       <button class="v-go" id="gStart">単元を選んで解く</button>
-       <button class="v-switch" id="gSwitch">問題集を切り替える</button>`
-    : ready
-      ? catBar() +
-        checkupCard(book) +
-        '<button class="v-go" id="gCheckup">総復習テストを受ける</button>' +
-        sizeChips +
-        '<button class="v-ghost" id="gStart">単元を選んで解く</button>' +
-        mixedBlock +
-        reviewBlock +
-        '<button class="v-switch" id="gSwitch">問題集を切り替える</button>'
-      : catBar() +
-        `<div class="v-lead">
-           <div class="cap">${esc(book.name)}</div>
-           <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">習得 ${book.mastered} 問</div>
-         </div>
-         <button class="v-go" id="gStart">単元を選んで解く</button>` +
-        mixedBlock +
-        reviewBlock +
-        `<p class="v-note" style="text-align:center">
-           あと ${CHECKUP_MIN_MASTERED - book.mastered} 問で総復習テストが受けられます。
-           一度できた問題を忘れていないか確かめるテストなので、まず単元を進めてください。
-         </p>
-         <button class="v-switch" id="gSwitch">問題集を切り替える</button>`;
+         <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">${
+           hasHistory ? `習得 ${book.mastered} 問` : 'まずは1単元やってみましょう'
+         }</div>
+       </div>` +
+      mainActions +
+      `<p class="v-note" style="text-align:center">
+         あと ${CHECKUP_MIN_MASTERED - book.mastered} 問で総復習テストが受けられます。
+         一度できた問題を忘れていないか確かめるテストなので、まず解き進めてください。
+       </p>
+       <button class="v-switch" id="gSwitch">問題集を切り替える</button>`;
 
   app().innerHTML = shell('', book.name, body);
   bindNav();
