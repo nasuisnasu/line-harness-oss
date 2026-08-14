@@ -422,6 +422,36 @@ export async function getCheckupQuestions(
 }
 
 /**
+ * 総合演習の出題（`kind='mixed'`）。
+ *
+ * **全分野からただランダムに引く。** 状態（未挑戦・復習・習得）で重みを付けない。
+ *
+ * 他の3つと役割が違う。
+ *   単元テスト   … 単元を選ぶ。状態を見て枠を配る（未挑戦とつまずきを優先）
+ *   復習テスト   … 直近で間違えた問題だけ
+ *   総復習テスト … 最後に正解してから古い順（忘れの検出）
+ *   **総合演習   … 分野をまたいで通しで解く。実戦形式の練習**
+ *
+ * 総復習テストは古い問題に偏らせてあるので、練習としては偏りがある。
+ * 「分野を決めずにとにかく解きたい」に応えるのがこちら。**測定ではなく練習**なので、
+ * 解説はその場で出すし、抽出に細工もしない。
+ */
+export async function getMixedQuestions(
+  db: D1Database,
+  bookId: number,
+  limit = 20,
+): Promise<GrammarQuestion[]> {
+  const rows = await db
+    .prepare(
+      `SELECT ${Q_COLS} FROM grammar_questions
+       WHERE book_id = ? ORDER BY RANDOM() LIMIT ?`,
+    )
+    .bind(bookId, limit)
+    .all<GrammarQuestionRow>();
+  return rows.results.map(toQuestion).filter(usable).sort((a, b) => a.no - b.no);
+}
+
+/**
  * まだできていない問題（復習キュー）。習得率の裏返しで、別ロジックにはしない。
  *
  * 期間の窓は設けない。正解すれば直近の解答が変わって自動的に外れる。

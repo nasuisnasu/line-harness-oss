@@ -43,7 +43,15 @@ function fmtDateTime(iso: string): string {
 }
 
 const kindLabel = (k: string) =>
-  k === 'checkup' ? '総復習' : k === 'review' ? '復習' : k === 'retry' ? 'もう一度' : '単元'
+  k === 'checkup'
+    ? '総復習'
+    : k === 'mixed'
+      ? '総合演習'
+      : k === 'review'
+        ? '復習'
+        : k === 'retry'
+          ? 'もう一度'
+          : '単元'
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`
 

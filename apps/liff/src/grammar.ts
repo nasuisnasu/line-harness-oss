@@ -17,6 +17,7 @@
  * テストは3種類。名前を混ぜないこと。
  *     単元テスト   … 単元（または分野まるごと）を選んで解く（kind='normal'）
  *     復習テスト   … 直近で間違えた問題だけ（kind='review'）
+ *     総合演習     … 分野をまたいで通しで解く練習（kind='mixed'）
  *     総復習テスト … 最後に正解してから古い問題を引き直す（kind='checkup'）
  *
  * ★ 総復習テストは**実力を測っていない。仕事は「忘れの検出」1点。**
@@ -151,7 +152,7 @@ interface LogEntry extends Question {
   ms: number | null;
 }
 
-type Kind = 'normal' | 'review' | 'retry' | 'checkup';
+type Kind = 'normal' | 'review' | 'retry' | 'checkup' | 'mixed';
 
 // ── 状態 ────────────────────────────────────────────────────────────────────
 
@@ -181,6 +182,7 @@ const cfg = {
   ord: 'rnd' as 'seq' | 'rnd',
   tmr: 0,
   checkupSize: 20,
+  mixedSize: 20,
 };
 
 const state = {
@@ -335,7 +337,9 @@ function injectStyles(): void {
 .g-exp.none{color:var(--fg3);font-size:13px}
 
 /* ── 分野の一覧 ── */
-.g-sec .nm{font-size:15.5px;font-weight:700;letter-spacing:-.01em}
+/* 分野カード（.g-sec）と単元カード（.g-sec2）の両方に効かせる。
+   以前は .g-sec だけを指していて、単元カードのタイトルが素の 400 に落ちていた。 */
+.v-sec .nm{font-size:16.5px;font-weight:800;letter-spacing:-.02em;line-height:1.4}
 
 /* ── 結果の問題リスト ── */
 .v-list li.g-li{display:block;padding:12px 15px}
@@ -625,6 +629,16 @@ async function showHome(): Promise<void> {
     )
     .join('')}</div>`;
 
+  // 総合演習。分野を決めずに通しで解く練習。総復習テストと違って抽出に細工をしない。
+  const mixedBlock =
+    '<button class="v-ghost" id="gMixed">総合演習（分野をまたいで解く）</button>' +
+    `<div class="v-row" style="justify-content:center;margin-top:8px">${[20, 30, 50]
+      .map(
+        (n) =>
+          `<button class="v-chip${cfg.mixedSize === n ? ' on' : ''}" data-msize="${n}">${n}問</button>`,
+      )
+      .join('')}</div>`;
+
   const body = !hasHistory
     ? // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
       catBar() +
@@ -640,6 +654,7 @@ async function showHome(): Promise<void> {
         '<button class="v-go" id="gCheckup">総復習テストを受ける</button>' +
         sizeChips +
         '<button class="v-ghost" id="gStart">単元を選んで解く</button>' +
+        mixedBlock +
         reviewBlock +
         '<button class="v-switch" id="gSwitch">問題集を切り替える</button>'
       : catBar() +
@@ -648,6 +663,7 @@ async function showHome(): Promise<void> {
            <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">習得 ${book.mastered} 問</div>
          </div>
          <button class="v-go" id="gStart">単元を選んで解く</button>` +
+        mixedBlock +
         reviewBlock +
         `<p class="v-note" style="text-align:center">
            あと ${CHECKUP_MIN_MASTERED - book.mastered} 問で総復習テストが受けられます。
@@ -670,6 +686,15 @@ async function showHome(): Promise<void> {
       document
         .querySelectorAll<HTMLElement>('[data-size]')
         .forEach((x) => x.classList.toggle('on', Number(x.dataset.size) === cfg.checkupSize));
+    };
+  });
+  bind('gMixed', () => void startMixed());
+  document.querySelectorAll<HTMLElement>('[data-msize]').forEach((el) => {
+    el.onclick = () => {
+      cfg.mixedSize = Number(el.dataset.msize);
+      document
+        .querySelectorAll<HTMLElement>('[data-msize]')
+        .forEach((x) => x.classList.toggle('on', Number(x.dataset.msize) === cfg.mixedSize));
     };
   });
   bind('gReview', () => void startReview());
@@ -914,6 +939,31 @@ async function startCheckup(size = cfg.checkupSize): Promise<void> {
     // 条件を毎回そろえないと回をまたいで比べられない。制限時間を固定する。
     cfg.tmr = CHECKUP_TIMER;
     begin(res.questions, 'checkup', null, null);
+  } catch (e) {
+    renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
+  }
+}
+
+/**
+ * 総合演習。分野をまたいで通しで解く練習。
+ *
+ * 総復習テスト（checkup）は「最後に正解してから古い順」に偏らせてあるので、
+ * 練習として通しで解くには向かない。こちらは素のランダムで、制限時間も付けない。
+ * 解説はその場で出す（測定ではなく練習なので）。
+ */
+async function startMixed(size = cfg.mixedSize): Promise<void> {
+  renderLoading();
+  try {
+    cfg.mixedSize = size;
+    const res = await api<{ questions: Question[] }>(
+      `/api/grammar/mixed?book_id=${cfg.bookId}&size=${size}`,
+    );
+    if (!res.questions.length) {
+      await showHome();
+      return;
+    }
+    cfg.tmr = 0;
+    begin(res.questions, 'mixed', null, null);
   } catch (e) {
     renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
   }
@@ -1310,7 +1360,11 @@ async function showRecords(): Promise<void> {
   }
 
   const kindLabel = (k: string) =>
-    k === 'checkup' ? '総復習' : k === 'review' ? '復習' : k === 'retry' ? 'もう一度' : '単元';
+    k === 'checkup' ? '総復習'
+      : k === 'mixed' ? '総合演習'
+      : k === 'review' ? '復習'
+      : k === 'retry' ? 'もう一度'
+      : '単元';
 
   const history = rec.sessions.length
     ? `<div class="v-card"><span class="lg">テスト履歴</span>

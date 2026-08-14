@@ -16,6 +16,7 @@ import {
   getGrammarBookById,
   getCategoryTestQuestions,
   getCheckupQuestions,
+  getMixedQuestions,
   getReviewQuestions,
   getGrammarDashboard,
   getGrammarRecords,
@@ -48,6 +49,8 @@ const MAX_QUESTIONS_PER_REQUEST = 100;
 const MAX_REVIEW_QUESTIONS = 20;
 /** 実力テストで選べる問題数。多いほど点が安定する。 */
 const CHECKUP_SIZES = [20, 30, 50];
+/** 総合演習で選べる問題数。練習なので実力テストより多めまで許す。 */
+const MIXED_SIZES = [20, 30, 50];
 
 // ── 生徒用 ──────────────────────────────────────────────────────────────────
 
@@ -186,6 +189,28 @@ grammar.get('/api/grammar/checkup', async (c) => {
  * ダッシュボードに全単元（140）を積むとホームの応答が重くなるだけなので、
  * 分野を掘ったときにここだけ取りに来る。
  */
+/**
+ * 総合演習。分野をまたいで通しで解く練習用。
+ *
+ * 総復習テスト（`/checkup`）は古い問題に偏らせてあるので練習には向かない。
+ * こちらは全分野からただランダムに引く。
+ */
+grammar.get('/api/grammar/mixed', async (c) => {
+  const gate = await requireStudent(c, 'grammar');
+  if (!gate.ok) {
+    const d = denied(gate.status);
+    return c.json(d.body, d.status);
+  }
+  const bookId = Number(c.req.query('book_id'));
+  if (!bookId) return c.json({ success: false, error: 'book_id は必須です' }, 400);
+
+  const size = MIXED_SIZES.includes(Number(c.req.query('size')))
+    ? Number(c.req.query('size'))
+    : MIXED_SIZES[0];
+  const questions = await getMixedQuestions(c.env.DB, bookId, size);
+  return c.json({ success: true, questions });
+});
+
 grammar.get('/api/grammar/units', async (c) => {
   const gate = await requireStudent(c, 'grammar');
   if (!gate.ok) {
@@ -272,7 +297,7 @@ grammar.post('/api/grammar/sessions', async (c) => {
   const book = await getGrammarBookById(c.env.DB, body.book_id);
   if (!book) return c.json({ success: false, error: '問題集が見つかりません' }, 404);
 
-  const kind = ['normal', 'review', 'retry', 'checkup'].includes(body.kind || '')
+  const kind = ['normal', 'review', 'retry', 'checkup', 'mixed'].includes(body.kind || '')
     ? (body.kind as string)
     : 'normal';
   const orderMode = body.order_mode === 'seq' ? 'seq' : 'rnd';
