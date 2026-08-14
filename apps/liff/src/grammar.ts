@@ -40,6 +40,15 @@ import { CAT_PNG_BASE64 } from './vocab-cat.js';
 
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 
+/**
+ * ビルドの目印。ホームの最下部に小さく出す。
+ *
+ * LINE内ブラウザはHTMLを強くキャッシュするので「直したはずなのに変わらない」が起きる。
+ * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
+ * 中身を変えたらこの値も上げること。
+ */
+const BUILD = '2026-08-14c';
+
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
 interface Question {
@@ -665,7 +674,11 @@ async function showHome(): Promise<void> {
        </p>
        <button class="v-switch" id="gSwitch">問題集を切り替える</button>`;
 
-  app().innerHTML = shell('', book.name, body);
+  app().innerHTML = shell(
+    '',
+    book.name,
+    body + `<p class="v-note" style="text-align:center;opacity:.5">build ${BUILD}</p>`,
+  );
   bindNav();
 
   const bind = (id: string, fn: () => void) => {
