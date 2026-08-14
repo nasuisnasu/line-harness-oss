@@ -1,0 +1,15 @@
+# LIFF の配信元は Cloudflare Pages (readash-liff)。Vercel ではない。
+# HTML はハッシュ無しなので毎回取り直させる。assets はハッシュ付きなので永久キャッシュ。
+# Cloudflare の _headers はマッチしたルールを「重ねる」ので /* は使わない
+# （/* に no-store を書くと assets にも付いて immutable と矛盾する）。
+/
+  Cache-Control: no-store, must-revalidate
+
+/index.html
+  Cache-Control: no-store, must-revalidate
+
+/version.txt
+  Cache-Control: no-store, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
