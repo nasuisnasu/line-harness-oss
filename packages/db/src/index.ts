@@ -23,6 +23,7 @@ export * from './forms';
 export * from './rich-menus';
 export * from './business-calendar';
 export * from './vocab';
+export * from './grammar';
 
 /**
  * Thin wrapper around D1Database.

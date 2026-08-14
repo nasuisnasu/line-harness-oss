@@ -42,6 +42,7 @@ import { kpi } from './routes/kpi.js';
 import { businessCalendar } from './routes/business-calendar.js';
 import { pay } from './routes/pay.js';
 import { vocab } from './routes/vocab.js';
+import { grammar } from './routes/grammar.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
 import { materialSubmissions } from './routes/material-submissions.js';
 
@@ -61,7 +62,8 @@ export type Env = {
     GOOGLE_SA_JSON?: string;
     UNIVAPAY_WEBHOOK_SECRET?: string;
     PAY_DISCORD_WEBHOOK_URL?: string;  // 課金通知の専用Discord（未設定ならDISCORD_WEBHOOK_URLにフォールバック）
-    // 単語テスト（受講生専用）。3つとも設定されていないとゲートが fail closed で全部 503 になる
+    // 単語テスト・文法テスト（受講生専用）で共用。3つとも設定されていないと
+    // ゲートが fail closed になり、両方の生徒用APIが全部 503 を返す
     VOCAB_LOGIN_CHANNEL_ID?: string;   // 受講生専用OAの LINE Login チャネルID
     VOCAB_LINE_ACCOUNT_ID?: string;    // 受講生専用OAの line_accounts.id
     VOCAB_ALLOW_TAG_ID?: string;       // 受講生タグの tags.id
@@ -116,6 +118,7 @@ app.route('/', kpi);
 app.route('/', businessCalendar);
 app.route('/', pay);
 app.route('/', vocab);
+app.route('/', grammar);
 app.route('/', eijakuMaterials);
 app.route('/', materialSubmissions);
 

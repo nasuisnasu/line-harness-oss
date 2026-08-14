@@ -26,6 +26,9 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     // ここでは素通しし、routes/vocab.ts の requireStudent() で3段のゲートをかける。
     // /api/vocab/admin/* は素通ししない（API_KEY で守る）。
     (path.startsWith('/api/vocab/') && !path.startsWith('/api/vocab/admin')) ||
+    // 文法テストの生徒用API。単語テストと同じ理由で素通しし、
+    // routes/grammar.ts の requireStudent() で3段のゲートをかける。
+    (path.startsWith('/api/grammar/') && !path.startsWith('/api/grammar/admin')) ||
     // 授業教材の生徒用API。同じく Authorization を idToken に使うので素通しし、
     // routes/eijaku-materials.ts の requireStudent() で3段のゲートをかける。
     // /api/eijaku/students も同様に素通しし、ルート側で共有鍵（X-Shelf-Key）を確かめる。

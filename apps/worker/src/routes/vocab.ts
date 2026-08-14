@@ -5,8 +5,9 @@
  * アクセス制御の設計は `.company/英弱ニキ/lms/vocab/10-access-control.md` が正本。
  *
  * 生徒用エンドポイントは authMiddleware をスキップさせている（Authorization ヘッダを
- * API_KEY ではなく idToken に使うため）。したがって**このファイル内のゲートが唯一の壁**。
+ * API_KEY ではなく idToken に使うため）。したがって**ゲートが唯一の壁**。
  * 各ハンドラの先頭で必ず requireStudent() を通す。
+ * ゲート本体は文法テストと共有している（`lib/student-gate.ts`）。
  */
 
 import { Hono } from 'hono';
@@ -28,10 +29,9 @@ import {
   getVocabStudentDetail,
   upsertVocabBook,
   replaceVocabWords,
-  getFriendByLineUserId,
   jstNow,
 } from '@line-crm/db';
-import type { Friend } from '@line-crm/db';
+import { requireStudent as gateRequireStudent, denied } from '../lib/student-gate.js';
 import type { Env } from '../index.js';
 
 export const vocab = new Hono<Env>();
@@ -48,88 +48,10 @@ const MAX_REVIEW_WORDS = 20;
 /** 実力テストで選べる問題数。多いほど点が安定する（20問は±9点、50問は±6点）。 */
 const CHECKUP_SIZES = [20, 30, 50];
 
-// ── ゲート ──────────────────────────────────────────────────────────────────
-
-type Gate = { ok: true; friend: Friend } | { ok: false; status: 401 | 403 | 503; message: string };
-
-/**
- * 3段のゲート。1つでも欠けたら通さない。
- *
- *   1. idToken が LINE の検証エンドポイントで有効（client_id はサーバー側の env）
- *   2. 受講生専用OAの friends に存在する
- *   3. 受講生タグを持っている
- *
- * env が未設定のときは**通さない**（fail closed）。設定漏れのまま deploy して
- * 全員に開いてしまうほうが、初回に 503 で気づくよりずっと悪い。
- */
-async function requireStudent(c: {
-  req: { header(name: string): string | undefined };
-  env: Env['Bindings'];
-}): Promise<Gate> {
-  const loginChannelId = c.env.VOCAB_LOGIN_CHANNEL_ID;
-  const lineAccountId = c.env.VOCAB_LINE_ACCOUNT_ID;
-  const allowTagId = c.env.VOCAB_ALLOW_TAG_ID;
-
-  if (!loginChannelId || !lineAccountId || !allowTagId) {
-    console.error(
-      '[vocab] 設定が足りていません。VOCAB_LOGIN_CHANNEL_ID / VOCAB_LINE_ACCOUNT_ID / VOCAB_ALLOW_TAG_ID を設定してください',
-    );
-    return { ok: false, status: 503, message: 'not configured' };
-  }
-
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return { ok: false, status: 401, message: 'unauthorized' };
-  }
-  const idToken = authHeader.slice('Bearer '.length);
-
-  // ── 1段目：LINE に検証させる ──
-  // 自前で JWT をデコードして sub を読むだけにしないこと。署名を見ていないので誰でも作れる。
-  // client_id を渡さないと、別チャネルで発行されたトークンが通ってしまう。
-  const verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ id_token: idToken, client_id: loginChannelId }),
-  });
-  if (!verifyRes.ok) {
-    return { ok: false, status: 401, message: 'unauthorized' };
-  }
-  const verified = await verifyRes.json<{ sub: string }>();
-
-  // ── 2段目：受講生専用OAの友だちか ──
-  const friend = await getFriendByLineUserId(c.env.DB, verified.sub, lineAccountId);
-  if (!friend) {
-    return { ok: false, status: 403, message: 'forbidden' };
-  }
-
-  // ── 3段目：受講生タグを持っているか ──
-  // LINE公式アカウントは ID を知られれば誰でも友だち追加できる。
-  // 「友だちであること」だけでは受講生に絞れない。
-  const tagged = await c.env.DB.prepare(
-    `SELECT 1 FROM friend_tags WHERE friend_id = ? AND tag_id = ? LIMIT 1`,
-  )
-    .bind(friend.id, allowTagId)
-    .first();
-  if (!tagged) {
-    return { ok: false, status: 403, message: 'forbidden' };
-  }
-
-  return { ok: true, friend };
-}
-
-/** 403 のレスポンスに内部事情を書かない（語数・単語帳名・生徒の有無を漏らさない）。 */
-function denied(status: 401 | 403 | 503) {
-  const body =
-    status === 503
-      ? { success: false, error: 'サーバーの設定が完了していません' }
-      : { success: false, error: '受講生の方のみご利用いただけます' };
-  return { body, status } as const;
-}
-
 // ── 生徒用 ──────────────────────────────────────────────────────────────────
 
 vocab.get('/api/vocab/books', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -139,7 +61,7 @@ vocab.get('/api/vocab/books', async (c) => {
 });
 
 vocab.get('/api/vocab/words', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -191,7 +113,7 @@ vocab.get('/api/vocab/words', async (c) => {
 
 /** 使う単語帳を決める／あとから切り替える。 */
 vocab.put('/api/vocab/book', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -208,7 +130,7 @@ vocab.put('/api/vocab/book', async (c) => {
 });
 
 vocab.get('/api/vocab/review', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -239,7 +161,7 @@ vocab.get('/api/vocab/review', async (c) => {
  * ここは語数を20に固定することで「全件取得の経路を作らない」線引きを守る。
  */
 vocab.get('/api/vocab/checkup', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -264,7 +186,7 @@ vocab.get('/api/vocab/checkup', async (c) => {
 });
 
 vocab.get('/api/vocab/dashboard', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -274,7 +196,7 @@ vocab.get('/api/vocab/dashboard', async (c) => {
 });
 
 vocab.get('/api/vocab/records', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
@@ -287,7 +209,7 @@ vocab.get('/api/vocab/records', async (c) => {
 });
 
 vocab.post('/api/vocab/sessions', async (c) => {
-  const gate = await requireStudent(c);
+  const gate = await gateRequireStudent(c, 'vocab');
   if (!gate.ok) {
     const d = denied(gate.status);
     return c.json(d.body, d.status);

@@ -221,6 +221,81 @@ export const api = {
         '/api/vocab/admin/books' + (lineAccountId ? '?lineAccountId=' + lineAccountId : '')
       ),
   },
+  /**
+   * 文法テスト（受講生専用）。単語テストと同じく、一覧には必ず
+   * `{ lineAccountId: selectedAccount.id }` を渡すこと。渡さないと複数OAの生徒が混ざる。
+   */
+  grammar: {
+    students: (params: { lineAccountId?: string; tagId?: string }) => {
+      const q = new URLSearchParams()
+      if (params.lineAccountId) q.set('lineAccountId', params.lineAccountId)
+      if (params.tagId) q.set('tagId', params.tagId)
+      return fetchApi<{ success: boolean; students: GrammarStudentRow[] }>(
+        '/api/grammar/admin/students?' + q.toString()
+      )
+    },
+    student: (friendId: string, bookId?: number) =>
+      fetchApi<{ success: boolean } & GrammarStudentDetail>(
+        '/api/grammar/admin/students/' + friendId + (bookId ? '?book_id=' + bookId : '')
+      ),
+    sessionAnswers: (sessionId: number) =>
+      fetchApi<{ success: boolean; answers: GrammarAnswerRow[] }>(
+        '/api/grammar/admin/sessions/' + sessionId + '/answers'
+      ),
+    books: (lineAccountId?: string) =>
+      fetchApi<{ success: boolean; books: GrammarBookSummary[] }>(
+        '/api/grammar/admin/books' + (lineAccountId ? '?lineAccountId=' + lineAccountId : '')
+      ),
+    questions: (bookId: number, params?: { category?: string; limit?: number; offset?: number }) => {
+      const q = new URLSearchParams({ book_id: String(bookId) })
+      if (params?.category) q.set('category', params.category)
+      if (params?.limit) q.set('limit', String(params.limit))
+      if (params?.offset) q.set('offset', String(params.offset))
+      return fetchApi<{ success: boolean; questions: GrammarQuestionRow[]; total: number }>(
+        '/api/grammar/admin/questions?' + q.toString()
+      )
+    },
+    distractors: (bookId: number, friendId?: string) => {
+      const q = new URLSearchParams({ book_id: String(bookId) })
+      if (friendId) q.set('friendId', friendId)
+      return fetchApi<{ success: boolean; distractors: GrammarDistractor[] }>(
+        '/api/grammar/admin/distractors?' + q.toString()
+      )
+    },
+    /**
+     * 問題集の登録・取り込み。
+     *
+     * fetchApi は失敗時に本文を読まずに投げるので、ここだけ自前で fetch する。
+     * 取り込みは**どの行がなぜ弾かれたか**が分からないと直しようがない。
+     */
+    importBook: async (input: {
+      slug: string
+      name: string
+      lineAccountId?: string | null
+      sort?: number
+      tsv?: string
+      questions?: GrammarQuestionInput[]
+    }): Promise<{
+      success: boolean
+      imported?: number
+      error?: string
+      errors?: string[]
+      warnings?: string[]
+    }> => {
+      const res = await fetch(`${API_URL}/api/grammar/admin/books`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getApiKey()}` },
+        body: JSON.stringify(input),
+      })
+      return (await res.json().catch(() => ({ success: false, error: '通信に失敗しました' }))) as {
+        success: boolean
+        imported?: number
+        error?: string
+        errors?: string[]
+        warnings?: string[]
+      }
+    },
+  },
   businessCalendar: {
     get: (lineAccountId: string) =>
       fetchApi<ApiResponse<BusinessCalendar>>(
@@ -1295,6 +1370,200 @@ export type VocabTrendPoint = {
   kind: string
   total: number
   correct: number
+}
+
+// ── 文法テスト ──────────────────────────────────────────────────────────────
+
+export type GrammarCategoryInfo = {
+  name: string
+  count: number
+  from: number
+  to: number
+}
+
+export type GrammarBookSummary = {
+  id: number
+  slug: string
+  name: string
+  count: number
+  max_no: number
+  categories: GrammarCategoryInfo[]
+}
+
+export type GrammarQuestionInput = {
+  no: number
+  category: string
+  sub_category?: string | null
+  prompt: string
+  choices: string[]
+  answer: number
+  explanation?: string | null
+  level?: string | null
+  source?: string | null
+  /** 誤答ごとの勘違い。キーは choices の添字（正解の添字は含めない） */
+  distractors?: Record<string, string> | null
+}
+
+export type GrammarQuestionRow = {
+  id: number
+  no: number
+  category: string
+  sub_category: string | null
+  prompt: string
+  choices: string[]
+  answer: number
+  explanation: string | null
+  level: string | null
+  /** 講師用の出典メモ。生徒向けAPI（復習キュー等）からは返らないので任意。 */
+  source?: string | null
+  /** 誤答ごとの勘違い。管理画面でのみ返る */
+  distractors?: Record<string, string>
+}
+
+export type GrammarCategoryMastery = {
+  name: string
+  from: number
+  to: number
+  total: number
+  mastered: number
+  unmastered: number
+  untried: number
+  rate: number
+}
+
+export type GrammarCheckup = {
+  at: string
+  total: number
+  correct: number
+  score: number
+}
+
+export type GrammarBookMastery = {
+  id: number
+  name: string
+  total: number
+  mastered: number
+  unmastered: number
+  untried: number
+  rate: number
+  review_count: number
+  last_played_at: string | null
+  categories: GrammarCategoryMastery[]
+  checkups: GrammarCheckup[]
+  checkup_score: { score: number; correct: number; total: number; sessions: number } | null
+}
+
+/** よく間違えている単元。asked と questions の差が「繰り返し解いた度合い」 */
+export type GrammarUnitStat = {
+  category: string
+  name: string
+  /** 延べ解答数（retry を除く） */
+  asked: number
+  wrong: number
+  rate: number
+  /** 実際に触れた問題数 */
+  questions: number
+  total: number
+  mastered: number
+}
+
+export type GrammarStudentRow = {
+  friend_id: string
+  display_name: string | null
+  last_played_at: string | null
+  sessions: number
+  answers: number
+  latest_rate: number | null
+  checkup_score: number | null
+  checkup_sessions: number
+  book_name: string | null
+  total: number
+  mastered: number
+  unmastered: number
+  untried: number
+  rate: number | null
+  /** いちばんできていない単元。分野より具体的なので、そのまま授業で扱える */
+  weakest_unit: { category: string; name: string; rate: number; asked: number } | null
+}
+
+export type GrammarSessionRow = {
+  id: number
+  book_name: string
+  kind: string
+  category: string | null
+  sub_category: string | null
+  range_from: number | null
+  range_to: number | null
+  order_mode: string
+  timer_sec: number
+  started_at: string
+  finished_at: string
+  total: number
+  correct: number
+}
+
+export type GrammarWeakQuestion = {
+  question_id: number
+  no: number
+  category: string
+  prompt: string
+  choices: string[]
+  answer: number
+  explanation: string | null
+  wrong: number
+  asked: number
+}
+
+export type GrammarAnswerRow = {
+  question_id: number
+  no: number
+  category: string
+  prompt: string
+  choices: string[]
+  answer: number
+  chosen: number | null
+  ok: number
+  timed_out: number
+  elapsed_ms: number | null
+}
+
+export type GrammarCategoryStat = {
+  name: string
+  asked: number
+  correct: number
+  rate: number
+}
+
+/** どの誤答が選ばれたか。`picks` は choices と同じ並び。 */
+export type GrammarDistractor = {
+  question_id: number
+  no: number
+  category: string
+  sub_category: string | null
+  prompt: string
+  choices: string[]
+  answer: number
+  asked: number
+  picks: number[]
+  /** 誤答ごとの勘違い。キーは choices の添字 */
+  distractors: Record<string, string>
+  /** 一度も選ばれていない誤答の添字＝死んだ選択肢。生徒でなく問題の側の不具合 */
+  dead: number[]
+}
+
+export type GrammarStudentDetail = {
+  sessions: GrammarSessionRow[]
+  books: GrammarBookMastery[]
+  weak_questions: GrammarWeakQuestion[]
+  totals: { answers: number; sessions: number; days: number }
+  focus_book: { id: number; name: string } | null
+  categories: GrammarCategoryStat[]
+  /** よく間違えている単元。正答率の低い順 */
+  units: GrammarUnitStat[]
+  pace: { timeout_rate: number | null; median_ms: number | null } | null
+  review_questions: GrammarQuestionRow[]
+  distractors: GrammarDistractor[]
+  trend: VocabTrendPoint[]
 }
 
 export type VocabStudentDetail = {

@@ -21,6 +21,7 @@ import { initSendTemplate } from './send-template.js';
 import { initEijaku } from './eijaku.js';
 import { initSchedule } from './schedule.js';
 import { initVocab } from './vocab.js';
+import { initGrammar } from './grammar.js';
 import { initMaterials } from './materials.js';
 import { initSubmitMaterial } from './submit-material.js';
 
@@ -414,6 +415,8 @@ async function main() {
       await initEijaku(formId);
     } else if (page === 'vocab') {
       await initVocab();
+    } else if (page === 'grammar') {
+      await initGrammar();
     } else if (page === 'materials') {
       await initMaterials();
     } else if (page === 'submit') {
