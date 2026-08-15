@@ -900,18 +900,22 @@ function renderQuestion(): void {
   <div class="v-qno">NO. ${no3(w.no)}</div>
   ${
     cloze
-      ? `<div class="v-cloze">${clozeHtml(w.example ?? '')}</div>
+      ? // 和訳は選択肢の**下**に置く。上に入れると、答えた瞬間に選択肢が押し下がる。
+        // 例文の枠は3行分で固定してある（97%が2行、3%が3行）。
+        // そうしないと、文の長さで選択肢の位置が問題ごとに変わって読みづらい。
+        `<div class="v-cloze">${clozeHtml(w.example ?? '')}</div>
+  <div class="v-opts" id="vOpts"></div>
   <div class="v-reveal v-hide" id="vReveal">
     <div class="v-cja">${esc(w.example_ja ?? '')}</div>
   </div>`
-      : `<div class="v-qword">${esc(askEn ? w.en : w.ja)}</div>
+      : // 4択のときは答えを別に出さない。正解の選択肢が色で分かるうえ、
+        // 途中で要素が増えると選択肢の位置がずれて読みづらい。
+        `<div class="v-qword">${esc(askEn ? w.en : w.ja)}</div>
   <div class="v-reveal v-hide" id="vReveal">
     <div class="v-aword">${esc(askEn ? w.ja : w.en)}</div>
-  </div>`
+  </div>
+  <div class="v-opts${cfg.fmt === 'recall' ? ' v-hide' : ''}" id="vOpts"></div>`
   }
-  <!-- 4択のときは答えを別に出さない。正解の選択肢が色で分かるうえ、
-       途中で要素が増えると選択肢の位置がずれて読みづらい -->
-  <div class="v-opts${cfg.fmt === 'recall' ? ' v-hide' : ''}" id="vOpts"></div>
 </div>
 <div class="v-acts" id="vActs"></div>
 <button class="v-abort" id="vAbort">中断する（記録は残りません）</button>`;
@@ -1105,9 +1109,17 @@ async function sendSession(): Promise<void> {
   }
 }
 
-/** 例文の空所を正解の語で埋めて返す。復習で読ませるのはこの形。 */
+/**
+ * 例文の空所を正解の語で埋めて返す。復習で読ませるのはこの形。
+ *
+ * 空所の直後の空白は落とす。元データは `___ , not just physical.` のように
+ * 下線と句読点が詰まらないよう空白を入れてあるが、語を入れると
+ * `physical , not` と句読点の前が空いてしまう。
+ */
 function filledHtml(w: Word): string {
-  return esc(w.example ?? '').replace('___', `<b class="v-fill">${esc(w.en)}</b>`);
+  return esc(w.example ?? '')
+    .replace('___', `<b class="v-fill">${esc(w.en)}</b>`)
+    .replace(/<\/b> ([,.;:?!])/, '</b>$1');
 }
 
 /**
@@ -1135,7 +1147,7 @@ function resultTabs(ng: LogEntry[], ok: LogEntry[]): string {
       w.to ? ' <span class="t">時間切れ</span>' : ''
     }</span><span class="j">${esc(w.ja)}</span>${
       withEx && w.example
-        ? `<div class="x"><p>${filledHtml(w)}</p><p class="xj">${esc(w.example_ja ?? '')}</p></div>`
+        ? `<div class="v-ex"><p>${filledHtml(w)}</p><p class="ja">${esc(w.example_ja ?? '')}</p></div>`
         : ''
     }</li>`;
   const pane = (p: 'ng' | 'ok', arr: LogEntry[]) =>

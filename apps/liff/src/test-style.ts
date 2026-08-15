@@ -278,17 +278,29 @@ details.v-adv > div{padding-bottom:16px}
 .v-qword{font-size:var(--q);font-weight:700;line-height:1.35;letter-spacing:-.025em;word-break:break-word}
 /* 例文穴埋め。単語1語より文が長いので、行間を広げて読ませる */
 .v-cloze{font-size:20px;font-weight:600;line-height:1.75;letter-spacing:-.01em;text-align:left;
-  word-break:normal;overflow-wrap:break-word;max-width:34em;margin:0 auto}
+  word-break:normal;overflow-wrap:break-word;max-width:34em;margin:0 auto;
+  /* 高さを固定して、文の長さで選択肢の位置が問題ごとに動かないようにする。
+     **flex や grid にしないこと。** 空所の <i> が独立したアイテムになり、
+     文が「Lack of sleep can / ___ / serious health problems.」と3行に割れる。
+     3行分（5.25em）を取るのは、実測で23%が3行になるため。2行分にすると
+     その23%で選択肢が1行ぶん下にずれる。 */
+  min-height:5.25em}
 .v-blank{display:inline-block;width:5.5em;height:1.05em;vertical-align:-.16em;margin:0 .18em;
   border-bottom:2.5px solid var(--lime);border-radius:1px}
 .v-cja{font-size:14px;font-weight:500;line-height:1.7;color:var(--fg2);text-align:left;
-  max-width:34em;margin:10px auto 0}
+  max-width:34em;margin:0 auto}
 /* 結果画面で読み返す例文。空所は正解の語で埋めて出す */
-.v-list.ex li{flex-wrap:wrap}
-.v-list.ex .x{flex:1 0 100%;margin:6px 0 2px;padding:8px 10px;border-radius:8px;
+/* li は display:grid（40px 1fr）。例文は**両列にまたがらせる**こと。
+   指定しないと40pxの列に落ちて、1行に2〜3文字ずつ折り返す。
+   クラス名を .v-ex にしているのは、.x が弱点語の「×3/5」で既に使われているため
+   （そのまま使うと等幅・赤字を継承して読みづらくなる）。 */
+.v-list.ex .v-ex{grid-column:1 / -1;margin:6px 0 2px;padding:9px 11px;border-radius:8px;
   background:var(--surface2);border-left:2px solid var(--lime)}
-.v-list.ex .x p{margin:0;font-size:13px;line-height:1.65;color:var(--fg2);text-align:left}
-.v-list.ex .x .xj{margin-top:3px;font-size:12px;color:var(--fg3)}
+.v-list.ex .v-ex p{margin:0;font-family:inherit;font-size:13.5px;line-height:1.7;
+  color:var(--fg2);text-align:left}
+.v-list.ex .v-ex .ja{margin-top:4px;font-size:12.5px;color:var(--fg3)}
+/* 例文が付くと1件が高いので、300pxの入れ子スクロールでは読めない。ページごと伸ばす */
+.v-list.ex ul{max-height:none;overflow:visible}
 .v-fill{color:var(--lime);font-weight:700}
 .v-reveal{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
 .v-aword{font-size:var(--a);font-weight:600;color:var(--lime);line-height:1.5}
