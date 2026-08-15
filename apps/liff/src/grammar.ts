@@ -47,7 +47,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15b';
+const BUILD = '2026-08-15c';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -328,9 +328,11 @@ function injectStyles(): void {
   el.textContent = `
 /* ── 出題（文法） ── */
 /* 単語は1語なので中央寄せで大きく出せるが、英文は左寄せでないと読めない */
-.g-stage{text-align:left}
-/* 出題画面は余白を詰める。1画面に「次へ」まで収めたい */
-.g-stage{padding:22px 18px}
+/* 出題画面。余白を詰めて「次へ」まで1画面に収める。
+   分野・単元・問題番号はここに出さない。**単元名が答えのヒントになる**ため。
+   （「受動態」と書いてある状態で受動態を問うても識別の力は測れない）
+   これらは答えたあと、解説の見出しに出す。 */
+.g-stage{text-align:left;padding:22px 18px}
 .g-q{font-size:19px;font-weight:600;line-height:1.75;letter-spacing:-.01em;word-break:normal;
   overflow-wrap:anywhere}
 .g-blank{display:inline-block;min-width:74px;border-bottom:2px solid var(--lime);
