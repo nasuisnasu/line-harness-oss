@@ -558,6 +558,18 @@ function blockMax(book: Book): number {
 }
 
 /** セクション（100語ブロック）の一覧。定着率つきで、押すとその範囲のテストが始まる。 */
+/**
+ * 設定画面の1行説明。形式チップを押した瞬間に差し替えるので関数にしてある。
+ *
+ * 穴埋めに方向（英→日／日→英）は無い。空所に入るのは英単語だけなので、
+ * 選ばせると意味のない選択肢を見せることになる。
+ */
+function setupSummary(): string {
+  const fmt = cfg.fmt === 'choice' ? '4択' : cfg.fmt === 'cloze' ? '例文穴埋め' : '意味を答える';
+  const dir = cfg.fmt === 'cloze' ? '' : `・${cfg.dir === 'ej' ? '英→日' : '日→英'}`;
+  return `セクションを選ぶと、その範囲のテストが始まります。${Math.min(cfg.lim, BLOCK)}問・${fmt}${dir}。`;
+}
+
 function renderSetup(): void {
   const book = state.books.find((b) => b.id === cfg.bookId);
   const dash = state.dashboard?.books.find((b) => b.id === cfg.bookId);
@@ -588,9 +600,7 @@ function renderSetup(): void {
     .join('');
 
   const body = `
-<p class="v-sub">セクションを選ぶと、その範囲のテストが始まります。${Math.min(cfg.lim, BLOCK)}問・${
-    cfg.fmt === 'choice' ? '4択' : cfg.fmt === 'cloze' ? '例文穴埋め' : '意味を答える'
-  }${cfg.fmt === 'cloze' ? '' : `・${cfg.dir === 'ej' ? '英→日' : '日→英'}`}。</p>
+<p class="v-sub" id="vSetupSub">${setupSummary()}</p>
 ${sections || '<p class="v-empty">セクションがありません。</p>'}
 
 <details class="v-adv">
@@ -613,8 +623,8 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
       ${chip('fmt', 'cloze', '例文穴埋め', cfg.fmt === 'cloze')}
       ${chip('fmt', 'recall', '意味を答える', cfg.fmt === 'recall')}
     </div>
-    <!-- 穴埋めは英文の空所に語を入れる形式しかないので、方向の選択は出さない -->
-    <div class="v-row${cfg.fmt === 'cloze' ? ' v-hide' : ''}" style="margin-top:8px">
+    <!-- 穴埋めは英文の空所に英単語を入れる形式しかないので、方向の選択は出さない -->
+    <div class="v-row${cfg.fmt === 'cloze' ? ' v-hide' : ''}" id="vDirRow" style="margin-top:8px">
       ${chip('dir', 'ej', '英 → 日', cfg.dir === 'ej')}
       ${chip('dir', 'je', '日 → 英', cfg.dir === 'je')}
     </div>
@@ -685,6 +695,10 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
     }
   };
 
+  const paintSummary = () => {
+    const el = document.getElementById('vSetupSub');
+    if (el) el.textContent = setupSummary();
+  };
   const paint = () => {
     cfg.from = fromBlk * BLOCK + 1;
     cfg.to = Math.min((toBlk + 1) * BLOCK, book.max_no);
@@ -711,8 +725,14 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
       document.querySelectorAll<HTMLElement>(`.v-chip[data-g="${g}"]`).forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       if (g === 'tmr') cfg.tmr = Number(b.dataset.v);
-      else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall' | 'cloze';
-      else if (g === 'dir') cfg.dir = b.dataset.v as 'ej' | 'je';
+      else if (g === 'fmt') {
+        cfg.fmt = b.dataset.v as 'choice' | 'recall' | 'cloze';
+        // 押した瞬間に反映する。描き直しを待つと、穴埋めなのに英→日／日→英が
+        // 選べる状態がそのまま残る。
+        document.getElementById('vDirRow')?.classList.toggle('v-hide', cfg.fmt === 'cloze');
+        paintSummary();
+      }
+      else if (g === 'dir') { cfg.dir = b.dataset.v as 'ej' | 'je'; paintSummary(); }
       else if (g === 'ord') cfg.ord = b.dataset.v as 'seq' | 'rnd';
     };
   });
@@ -900,14 +920,14 @@ function renderQuestion(): void {
   <div class="v-qno">NO. ${no3(w.no)}</div>
   ${
     cloze
-      ? // 和訳は選択肢の**下**に置く。上に入れると、答えた瞬間に選択肢が押し下がる。
-        // 例文の枠は3行分で固定してある（97%が2行、3%が3行）。
+      ? // **答えたあとに要素を足さないこと。** 和訳を出していたが、正解でも0.45秒、
+        // 不正解でも1.1秒で次の問題に進むので読めないうえ、その一瞬でカードが
+        // 伸びて縮む。和訳は結果画面の一覧でゆっくり読ませる。
+        //
+        // 例文の枠は3行分で固定してある（実測で2行77%・3行23%）。
         // そうしないと、文の長さで選択肢の位置が問題ごとに変わって読みづらい。
         `<div class="v-cloze">${clozeHtml(w.example ?? '')}</div>
-  <div class="v-opts" id="vOpts"></div>
-  <div class="v-reveal v-hide" id="vReveal">
-    <div class="v-cja">${esc(w.example_ja ?? '')}</div>
-  </div>`
+  <div class="v-opts" id="vOpts"></div>`
       : // 4択のときは答えを別に出さない。正解の選択肢が色で分かるうえ、
         // 途中で要素が増えると選択肢の位置がずれて読みづらい。
         `<div class="v-qword">${esc(askEn ? w.en : w.ja)}</div>
@@ -1033,8 +1053,6 @@ function pick(btn: HTMLButtonElement, w: Word): void {
   stopTimer();
   document.getElementById('vTbar')?.classList.add('v-hide');
   const right = Number(btn.dataset.id) === w.id;
-  // 穴埋めは正解の語が分かっても文の意味が分からないままになりうるので、和訳を出す
-  if (cfg.fmt === 'cloze') document.getElementById('vReveal')?.classList.remove('v-hide');
   document.querySelectorAll<HTMLButtonElement>('.v-opt').forEach((b) => {
     b.disabled = true;
     if (Number(b.dataset.id) === w.id) b.classList.add('ok');

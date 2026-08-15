@@ -287,8 +287,6 @@ details.v-adv > div{padding-bottom:16px}
   min-height:5.25em}
 .v-blank{display:inline-block;width:5.5em;height:1.05em;vertical-align:-.16em;margin:0 .18em;
   border-bottom:2.5px solid var(--lime);border-radius:1px}
-.v-cja{font-size:14px;font-weight:500;line-height:1.7;color:var(--fg2);text-align:left;
-  max-width:34em;margin:0 auto}
 /* 結果画面で読み返す例文。空所は正解の語で埋めて出す */
 /* li は display:grid（40px 1fr）。例文は**両列にまたがらせる**こと。
    指定しないと40pxの列に落ちて、1行に2〜3文字ずつ折り返す。
