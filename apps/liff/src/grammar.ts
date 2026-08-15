@@ -47,7 +47,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15a';
+const BUILD = '2026-08-15b';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -337,29 +337,26 @@ function injectStyles(): void {
 .g-blank{display:inline-block;min-width:74px;border-bottom:2px solid var(--lime);
   margin:0 4px;vertical-align:-2px}
 .g-uline{border-bottom:2px solid var(--accent);padding-bottom:1px}
-/* 解説。正解でも出す（合っていた理由が違うことがあるため） */
+/* 解説。正解でも出す（合っていた理由が違うことがあるため）
+ *
+ * **答える前から同じ大きさの枠を置いておく。** 解説が出るときに枠が生まれると、
+ * その高さのぶん下が伸びて画面が動く。先に場所を取っておけば中身が入れ替わるだけで、
+ * 問題文も選択肢も1pxも動かない。min-height は解説2〜3行ぶん。
+ * これより長い解説のときだけ下に伸びる（選択肢より下なので上は動かない）。 */
 .g-exp{margin-top:18px;padding:14px;border-radius:10px;border:1px solid var(--line2);
-  background:var(--surface2);font-size:14px;line-height:1.85;color:var(--fg2);text-align:left}
+  background:var(--surface2);font-size:14px;line-height:1.85;color:var(--fg2);text-align:left;
+  min-height:142px}
+.g-exp.waiting{display:flex;align-items:center;justify-content:center;
+  background:transparent;border-style:dashed;color:var(--fg3);font-size:12.5px}
 .g-exp b{display:block;font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.18em;
   color:var(--fg3);font-weight:500;margin-bottom:7px}
 .g-exp .ans{color:var(--lime);font-weight:700}
 .g-exp.none{color:var(--fg3);font-size:13px}
 
-/* 解説と「次へ」は下から出すシートに入れる。
-   本文の流れに差し込むと、解説の高さのぶん下が伸びて画面が動く。
-   さらにスクロールを送ると二重に動いて落ち着かない。
-   シートなら重なるだけなので、答えても問題文と選択肢が1pxも動かない。 */
-.g-sheet{position:fixed;left:0;right:0;bottom:0;z-index:60;
-  background:var(--surface);border-top:1px solid var(--line);
-  box-shadow:0 -12px 32px rgba(0,0,0,.3);
-  padding:14px 14px calc(14px + env(safe-area-inset-bottom,0px));
-  max-height:64vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
-  transform:translateY(101%);transition:transform .2s ease-out}
-.g-sheet.open{transform:translateY(0)}
-.g-sheet .in{max-width:860px;margin:0 auto}
-.g-sheet .g-exp{margin-top:0}
-.g-sheet .v-acts{margin-top:12px}
-@media (prefers-reduced-motion:reduce){.g-sheet{transition:none}}
+/* 「次へ」も答える前から場所を取っておく。visibility なら領域が残るので動かない。
+   display:none / 後から生やす、のどちらでも下がその高さぶんずれる。 */
+.g-acts-hold button{visibility:hidden}
+.g-acts-hold.on button{visibility:visible}
 
 /* ── 分野の一覧 ── */
 /* 分野カード（.g-sec）と単元カード（.g-sec2）の両方に効かせる。
@@ -1079,6 +1076,9 @@ function renderQuestion(): void {
   // 中身は**シャッフル前の添字**。これをそのままサーバーに送る。
   state.order = shuffle(q.choices.map((_, i) => i));
 
+  // 総復習テストは解説を出さず自動で次へ進むので、解説と「次へ」の枠自体を置かない。
+  const quiet = state.kind === 'checkup';
+
   const body = `
 <div class="v-stage g-stage">
   <div class="v-tbar${cfg.tmr ? '' : ' v-hide'}" id="gTbar"><i id="gTfill"></i><b id="gTleft"></b></div>
@@ -1089,12 +1089,16 @@ function renderQuestion(): void {
   </div>
   <div class="g-q">${renderPrompt(q.prompt)}</div>
   <div class="v-opts" id="gOpts"></div>
+  ${quiet ? '' : `<div class="g-exp waiting" id="gExp">選ぶと解説が出ます</div>`}
 </div>
-<button class="v-abort" id="gAbort">中断する（記録は残りません）</button>
-<div class="g-sheet" id="gSheet"><div class="in">
-  <div id="gExp"></div>
-  <div class="v-acts" id="gActs"></div>
-</div></div>`;
+${
+  quiet
+    ? ''
+    : `<div class="v-acts g-acts-hold" id="gActs"><button class="pri" id="gNext">${
+        state.idx >= state.queue.length - 1 ? '結果を見る' : '次の問題へ'
+      }</button></div>`
+}
+<button class="v-abort" id="gAbort">中断する（記録は残りません）</button>`;
 
   app().innerHTML = shell('', '', body, `${state.idx + 1} / ${state.queue.length}`, null);
   const prog = document.getElementById('gProg');
@@ -1165,29 +1169,18 @@ function settle(chosen: number | null): void {
   }
 
   // 解説は正解でも出す。合っていても理由が違っていることがある。
+  // 枠は最初から置いてあるので、中身を差し替えるだけ。**スクロールも送らない。**
   const exp = document.getElementById('gExp')!;
-  exp.className = 'g-exp' + (q.explanation ? '' : ' g-exp none');
+  exp.className = 'g-exp' + (q.explanation ? '' : ' none');
   exp.innerHTML = q.explanation
-    ? `<b>かいせつ</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span><br>${esc(
+    ? `<b>解説</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span><br>${esc(
         q.explanation,
       ).replace(/\n/g, '<br>')}`
-    : `<b>かいせつ</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span>`;
+    : `<b>解説</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span>`;
 
-  const acts = document.getElementById('gActs')!;
-  const last = state.idx >= state.queue.length - 1;
-  acts.innerHTML = `<button class="pri" id="gNext">${last ? '結果を見る' : '次の問題へ'}</button>`;
+  // ボタンも最初から置いてある。見えるようにするだけ（領域は既に取ってある）。
+  document.getElementById('gActs')!.classList.add('on');
   document.getElementById('gNext')!.onclick = next;
-  // シートを出すだけ。**スクロールは送らない。**
-  // 本文は動かないので、送ると却って「勝手に動いた」だけになる。
-  const sheet = document.getElementById('gSheet')!;
-  sheet.classList.add('open');
-
-  // シートの高さぶんだけ下に余白を足して、隠れた選択肢まで自分でスクロールできるようにする。
-  // 下に足すだけなので、いま見えているものは動かない。
-  requestAnimationFrame(() => {
-    const wrap = document.querySelector<HTMLElement>('.v-wrap');
-    if (wrap) wrap.style.paddingBottom = `${sheet.offsetHeight + 24}px`;
-  });
 }
 
 // ── 結果 ────────────────────────────────────────────────────────────────────
