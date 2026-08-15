@@ -15,16 +15,19 @@
  *      （テンポを保つため。解説は結果画面でまとめて読む）
  *
  * テストは3種類。名前を混ぜないこと。
- *     単元テスト   … 単元（または分野まるごと）を選んで解く（kind='normal'）
- *     やり直し     … 直近で間違えた問題だけ（kind='review'）。
- *                    **「復習テスト」とは呼ばない**（総復習テストと紛らわしい）
- *     総合演習     … 分野をまたいで通しで解く練習（kind='mixed'）
- *     総復習テスト … 最後に正解してから古い問題を引き直す（kind='checkup'）
+ *     総合演習   … 分野をまたいでランダムに出す。**スコアを測るのはこれ**（kind='mixed'）
+ *     単元テスト … 単元（または分野まるごと）を選んで解く（kind='normal'）
+ *     やり直し   … 直近で間違えた問題だけ（kind='review'）
  *
- * ★ 総復習テストは**実力を測っていない。仕事は「忘れの検出」1点。**
- *   習得率は「最後に解いたときに正解だったか」で時間経過を見ないので、
- *   3ヶ月前に正解したきりの問題も習得済みのまま残る。その穴だけを埋める。
- *   画面の文言で「実力」と書かないこと（`lms/grammar/01-categories.md`）。
+ * ★ 総復習テスト（kind='checkup'）は **2026-08-15 に廃止した。**
+ *   「一度できた問題を忘れていないか」を見るものだったが、
+ *   **総合演習のスコアがそれを含んでいる。** ランダムに引く以上、忘れた問題も
+ *   同じ確率で当たって落ちる。stale-first の抽出はそれを速く見つけるための
+ *   最適化でしかなく、ボタンをもう1つ増やして習得20問のゲートまで置く価値がない。
+ *   スコアを1本にしたほうが「上げる対象」がはっきりする。
+ *
+ * ★ 総合演習のスコアは**実力ではなく問題集の完成度**。未挑戦の問題も引くので、
+ *   進めれば上がる。画面の文言で「実力」と書かないこと。
  */
 
 declare const liff: {
@@ -48,7 +51,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15f';
+const BUILD = '2026-08-15g';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -169,19 +172,13 @@ type Kind = 'normal' | 'review' | 'retry' | 'checkup' | 'mixed';
 /** 1回のテストで出せる上限。サーバーの MAX_QUESTIONS_PER_REQUEST と揃えること。 */
 const MAX_QUESTIONS = 100;
 /**
- * 総復習テストの制限時間（秒）。
+ * 総合演習の制限時間（秒）。
  *
  * 単語（5秒）より長い。文法問題は英文を読む時間が要るので、5秒だと
  * 「知っているか」ではなく「読むのが速いか」を測ってしまう。
+ * **スコアを回またぎで比べるので、条件を固定する。**
  */
-const CHECKUP_TIMER = 20;
-/**
- * 総復習テストを主導線に出すのに必要な習得済み問題数。
- *
- * このテストの仕事は「前にできた問題を忘れていないか」なので、
- * **まだ何も仕上げていない生徒に見せても意味がない。** それまでは分野テストが主。
- */
-const CHECKUP_MIN_MASTERED = 20;
+const MIXED_TIMER = 20;
 
 const cfg = {
   bookId: 0,
@@ -191,7 +188,6 @@ const cfg = {
   /** 既定はランダム。番号順だと毎回おなじ並びで、順番で覚えてしまう。 */
   ord: 'rnd' as 'seq' | 'rnd',
   tmr: 0,
-  checkupSize: 20,
   mixedSize: 20,
 };
 
@@ -502,7 +498,7 @@ function sparkline(points: { rate: number; at: string; kind: string }[]): string
 }
 
 /**
- * 総復習テストの結果カード。
+ * 総合演習のスコアカード。
  *
  * **「実力」と書かない。** ここに出る数字は「一度できた問題を、時間をおいて
  * まだ解けるか」であって、入試で何点取れるかではない。
@@ -517,21 +513,21 @@ function checkupCard(b: DashboardBook): string {
   if (!pooled || !latest) {
     return `
 <div class="v-score-card">
-  <div class="hd"><em>総復習テスト</em></div>
-  <p class="none">一度できた問題を、しばらく経ってから解き直します。<br>
-     <b>忘れていないか</b>を確かめるためのテストです。</p>
+  <div class="hd"><em>総合演習のスコア</em></div>
+  <p class="none">問題集の<b>全範囲</b>からランダムに出します。<br>
+     いま何割答えられるかが分かります。</p>
 </div>`;
   }
   return `
 <div class="v-score-card">
-  <div class="hd"><em>総復習テスト</em><span>${esc(fmtDate(latest.at).slice(0, 5))}</span></div>
+  <div class="hd"><em>総合演習のスコア</em><span>${esc(fmtDate(latest.at).slice(0, 5))}</span></div>
   <div class="val">
     <b>${Math.round(pooled.score * 100)}<i>%</i></b>
     <u>直近${pooled.sessions}回・${pooled.total}問から算出<br>
        最新は ${Math.round(latest.score * 100)}%（${latest.correct}/${latest.total}）</u>
   </div>
   ${spark}
-  <p class="v-note">前にできた問題をいま解き直した正答率です。<b>入試の点数の予想ではありません。</b></p>
+  <p class="v-note">問題集の全範囲から引いた正答率です。<b>入試の点数の予想ではありません。</b></p>
 </div>`;
 }
 
@@ -650,55 +646,29 @@ async function showHome(): Promise<void> {
       ? '<p class="v-note" style="text-align:center">やり直しが必要な問題はありません。</p>'
       : '';
 
-  // 総復習テストは「前にできた問題を忘れていないか」を見るもの。
-  // まだ何も仕上げていないうちに主導線に置いても解くものが無いので、
-  // 習得済みが溜まるまでは単元テストを主にする。
-  const ready = book.mastered >= CHECKUP_MIN_MASTERED;
-
   const sizeChips = `<div class="v-row" style="justify-content:center;margin-top:10px">${[20, 30, 50]
     .map(
       (n) =>
-        `<button class="v-chip${cfg.checkupSize === n ? ' on' : ''}" data-size="${n}">${n}問</button>`,
+        `<button class="v-chip${cfg.mixedSize === n ? ' on' : ''}" data-size="${n}">${n}問</button>`,
     )
     .join('')}</div>`;
 
-  // 総合演習。分野を決めずに通しで解く練習。総復習テストと違って抽出に細工をしない。
-  //
-  // **問題数のチップはここには置かない。** 総復習テストの下にも同じ 20/30/50 が並び、
-  // 同じ見た目の選択が2つある状態になっていた。どちらに効くのか分からない。
-  // 主導線（総復習テスト）にだけ残し、こちらは固定にして数を文言に書く。
-  const mixedBlock = `<button class="v-ghost" id="gMixed">総合演習（分野をまたいで${cfg.mixedSize}問）</button>`;
-
-  // 分岐は2つだけにする。以前は3分岐で、初回の枝にだけ総合演習と復習を足し忘れていた。
-  // 枝ごとにボタンを並べ直す作りが原因なので、共通部分は1か所にまとめる。
-  const mainActions =
-    '<button class="v-ghost" id="gStart">単元を選んで解く</button>' + mixedBlock + reviewBlock;
-
-  const body = ready
-    ? catBar() +
-      checkupCard(book) +
-      '<button class="v-go" id="gCheckup">総復習テストを受ける</button>' +
-      sizeChips +
-      mainActions +
-      '<button class="v-switch" id="gSwitch">問題集を切り替える</button>'
-    : // まだ総復習テストを受けられない状態。
-      // ここも単語テストと同じく checkupCard を出す。**独自の数字を作らない。**
-      // 「習得15問」のような生の件数を1箇所だけ大きく出すと、
-      // 他の画面（％表記）と単位が揃わず、何を見ている数字なのか分からなくなる。
-      catBar() +
-      checkupCard(book) +
-      (hasHistory
-        ? ''
-        : `<div class="v-lead">
-             <div class="cap">${esc(book.name)}</div>
-             <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは1単元やってみましょう</div>
-           </div>`) +
-      mainActions +
-      `<p class="v-note" style="text-align:center">
-         あと ${CHECKUP_MIN_MASTERED - book.mastered} 問で総復習テストが受けられます。
-         一度できた問題を忘れていないか確かめるテストなので、まず解き進めてください。
-       </p>
-       <button class="v-switch" id="gSwitch">問題集を切り替える</button>`;
+  // 主導線は総合演習。**スコアを上げることが目的なので、それを一番上に置く。**
+  // 単元テストは「潰しに行く」ための手段、やり直しはその補助。
+  const body =
+    catBar() +
+    checkupCard(book) +
+    '<button class="v-go" id="gMixed">総合演習を受ける</button>' +
+    sizeChips +
+    '<button class="v-ghost" id="gStart">単元を選んで解く</button>' +
+    reviewBlock +
+    (hasHistory
+      ? ''
+      : `<p class="v-note" style="text-align:center">
+           まずは総合演習で、いまどれくらい解けるか見てみましょう。<br>
+           落とした問題から、どの単元を潰すかが決まります。
+         </p>`) +
+    '<button class="v-switch" id="gSwitch">問題集を切り替える</button>';
 
   app().innerHTML = shell(
     '',
@@ -712,13 +682,12 @@ async function showHome(): Promise<void> {
     if (el) el.onclick = fn;
   };
   bind('gStart', () => renderSetup());
-  bind('gCheckup', () => void startCheckup());
   document.querySelectorAll<HTMLElement>('[data-size]').forEach((el) => {
     el.onclick = () => {
-      cfg.checkupSize = Number(el.dataset.size);
+      cfg.mixedSize = Number(el.dataset.size);
       document
         .querySelectorAll<HTMLElement>('[data-size]')
-        .forEach((x) => x.classList.toggle('on', Number(x.dataset.size) === cfg.checkupSize));
+        .forEach((x) => x.classList.toggle('on', Number(x.dataset.size) === cfg.mixedSize));
     };
   });
   bind('gMixed', () => void startMixed());
@@ -947,34 +916,14 @@ async function startNormal(): Promise<void> {
 }
 
 /**
- * 総復習テスト。**最後に正解してから古い問題**をサーバーが優先して返す。
- * 実力ではなく「忘れていないか」を見るテスト。
- */
-async function startCheckup(size = cfg.checkupSize): Promise<void> {
-  renderLoading();
-  try {
-    cfg.checkupSize = size;
-    const res = await api<{ questions: Question[] }>(
-      `/api/grammar/checkup?book_id=${cfg.bookId}&size=${size}`,
-    );
-    if (!res.questions.length) {
-      await showHome();
-      return;
-    }
-    // 条件を毎回そろえないと回をまたいで比べられない。制限時間を固定する。
-    cfg.tmr = CHECKUP_TIMER;
-    begin(res.questions, 'checkup', null, null);
-  } catch (e) {
-    renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
-  }
-}
-
-/**
- * 総合演習。分野をまたいで通しで解く練習。
+ * 総合演習。分野をまたいでランダムに出す。**このスコアが唯一の指標。**
  *
- * 総復習テスト（checkup）は「最後に正解してから古い順」に偏らせてあるので、
- * 練習として通しで解くには向かない。こちらは素のランダムで、制限時間も付けない。
- * 解説はその場で出す（測定ではなく練習なので）。
+ * 未挑戦の問題も同じ確率で引くので、スコアは「問題集をどれだけ仕上げたか」を表す。
+ * 忘れた問題も同じ確率で当たって落ちるので、**「できているつもり」もここで炙り出る。**
+ * 総復習テスト（stale-first）を別に持たないのはこのため。
+ *
+ * 回をまたいでスコアを比べるので、制限時間を固定し、解説はその場で出さない
+ * （結果画面でまとめて読む）。
  */
 async function startMixed(size = cfg.mixedSize): Promise<void> {
   renderLoading();
@@ -987,7 +936,7 @@ async function startMixed(size = cfg.mixedSize): Promise<void> {
       await showHome();
       return;
     }
-    cfg.tmr = 0;
+    cfg.tmr = MIXED_TIMER;
     begin(res.questions, 'mixed', null, null);
   } catch (e) {
     renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
@@ -1081,8 +1030,8 @@ function renderQuestion(): void {
   // 中身は**シャッフル前の添字**。これをそのままサーバーに送る。
   state.order = shuffle(q.choices.map((_, i) => i));
 
-  // 総復習テストは解説を出さず自動で次へ進むので、解説と「次へ」の枠自体を置かない。
-  const quiet = state.kind === 'checkup';
+  // 総合演習は解説を出さず自動で次へ進むので、解説と「次へ」の枠自体を置かない。
+  const quiet = state.kind === 'mixed';
 
   const body = `
 <div class="v-stage g-stage">
@@ -1163,7 +1112,7 @@ function settle(chosen: number | null): void {
     else renderQuestion();
   };
 
-  if (state.kind === 'checkup') {
+  if (state.kind === 'mixed') {
     setTimeout(next, ok ? 500 : 1200);
     return;
   }
@@ -1309,21 +1258,21 @@ function renderResult(sending: boolean): void {
 
   const lists = resultTabs(ng, ok);
 
-  if (state.kind === 'checkup') {
-    // 総復習テストは点数がすべて。単元の定着率の変化は出さない（測っているものが違う）。
+  if (state.kind === 'mixed') {
+    // 総合演習は点数がすべて。単元の定着率の変化は出さない（測っているものが違う）。
     const pt = state.log.length ? Math.round((ok.length / state.log.length) * 100) : 0;
     const body0 = `
 <div class="v-score-card">
-  <div class="hd"><em>総復習テスト</em></div>
+  <div class="hd"><em>総合演習</em></div>
   <div class="val"><b>${pt}<i>%</i></b><u>${ok.length} / ${state.log.length} 問</u></div>
-  <p class="v-note">しばらく解いていない問題を選んで出しています。
-    ここで落とした問題は<b>忘れかけている</b>ということなので、やり直しに入りました。</p>
+  <p class="v-note">問題集の<b>全範囲</b>からランダムに出しています。
+    ここで落とした問題がいまの穴です。やり直しに入りました。</p>
 </div>
 ${lists}
 ${sending ? '<p class="v-hint">記録を保存しています...</p>' : ''}
 ${ng.length ? '<button class="v-go" id="gAgain">できなかった問題を復習する</button>' : ''}
 <button class="v-ghost" id="gHome">ホームに戻る</button>`;
-    app().innerHTML = shell('', '総復習テスト', body0, '', 'home');
+    app().innerHTML = shell('', '総合演習', body0, '', 'home');
     bindNav();
     bindResultTabs();
     bindRetry(ng);
@@ -1428,8 +1377,8 @@ async function showRecords(): Promise<void> {
   }
 
   const kindLabel = (k: string) =>
-    k === 'checkup' ? '総復習'
-      : k === 'mixed' ? '総合演習'
+    k === 'mixed' ? '総合演習'
+      : k === 'checkup' ? '総復習（廃止）'
       : k === 'review' ? 'やり直し'
       : k === 'retry' ? 'もう一度'
       : '単元';

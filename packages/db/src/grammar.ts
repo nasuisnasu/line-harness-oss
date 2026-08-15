@@ -355,87 +355,6 @@ function strip(q: GrammarQuestion & { st?: number; at?: string | null }): Gramma
   return rest;
 }
 
-/**
- * 総復習テストの出題（`kind='checkup'`）。
- *
- * **このテストは実力を測らない。仕事は「忘れの検出」1点。**
- * 詳しい経緯は `.company/英弱ニキ/lms/grammar/01-categories.md`。要点だけ書くと、
- *
- *   - 母集団が「この問題集」なので、点数は実力ではなく**問題集の完成度**にしかならない
- *   - しかも習得率が同じものを測っていて二重
- *   - ただし習得率は「**最後に解いたときに正解だったか**」で、時間経過を見ない。
- *     3ヶ月前に正解したきり触れていない問題も「習得済み」のまま残る
- *
- * この最後の穴を埋めるのがこのテスト。だから**最後に正解してから古い順に引く。**
- * 分野ごとの均等抽出はしない（忘れの検出には効かないうえ、
- * 20問で21分野を均等に割ると1分野1問になって分野別には何も読めない）。
- *
- * 優先順位は3段。
- *   1. 習得済み（直近が正解）を、**最後に正解した日が古い順** … これが本体
- *   2. 足りなければ未挑戦からランダム
- *   3. それでも足りなければ復習が必要なものから古い順
- *
- * 2以降はテストの長さを揃えるための穴埋めであって、忘れの検出ではない。
- */
-export async function getCheckupQuestions(
-  db: D1Database,
-  friendId: string,
-  bookId: number,
-  limit = 20,
-): Promise<GrammarQuestion[]> {
-  const rows = await db
-    .prepare(
-      `${LATEST_ANSWER_CTE}
-       SELECT ${Q_COLS.split(', ').map((c) => `q.${c}`).join(', ')},
-              CASE WHEN l.ok IS NULL THEN 2 WHEN l.ok = 0 THEN 1 ELSE 3 END AS st,
-              l.answered_at AS at
-       FROM grammar_questions q
-       LEFT JOIN latest l ON l.question_id = q.id
-       WHERE q.book_id = ?2
-       ORDER BY q.no ASC`,
-    )
-    .bind(friendId, bookId)
-    .all<GrammarQuestionRow & { st: number; at: string | null }>();
-
-  const all = rows.results.map((r) => ({ ...toQuestion(r), st: r.st, at: r.at })).filter(usable);
-  if (!all.length) return [];
-
-  const byOldest = (a: { at: string | null }, b: { at: string | null }) =>
-    (a.at ?? '').localeCompare(b.at ?? '');
-
-  const stale = all.filter((q) => q.st === 3).sort(byOldest);
-  const untried = shuffle(all.filter((q) => q.st === 2));
-  const wrong = all.filter((q) => q.st === 1).sort(byOldest);
-
-  const picked: typeof all = [];
-  const take = (src: typeof all) => {
-    for (const q of src) {
-      if (picked.length >= limit) break;
-      picked.push(q);
-    }
-  };
-  take(stale);
-  take(untried);
-  take(wrong);
-
-  return picked.sort((a, b) => a.no - b.no).map(strip);
-}
-
-/**
- * 総合演習の出題（`kind='mixed'`）。
- *
- * **全分野からただランダムに引く。** 状態（未挑戦・復習・習得）で重みを付けない。
- *
- * 他の3つと役割が違う。
- *   単元テスト   … 単元を選ぶ。状態を見て枠を配る（未挑戦とつまずきを優先）
- *   復習テスト   … 直近で間違えた問題だけ
- *   総復習テスト … 最後に正解してから古い順（忘れの検出）
- *   **総合演習   … 分野をまたいで通しで解く。実戦形式の練習**
- *
- * 総復習テストは古い問題に偏らせてあるので、練習としては偏りがある。
- * 「分野を決めずにとにかく解きたい」に応えるのがこちら。**測定ではなく練習**なので、
- * 解説はその場で出すし、抽出に細工もしない。
- */
 export async function getMixedQuestions(
   db: D1Database,
   bookId: number,
@@ -828,7 +747,17 @@ export function grammarPoolScore(
   };
 }
 
-/** 実力テストの履歴。古い→新しい。 */
+/**
+ * 総合演習のスコア履歴。古い→新しい。
+ *
+ * ⚠️ 2026-08-15 に**総復習テスト（kind='checkup'）を廃止**し、
+ * スコアは総合演習（kind='mixed'）で測るようにした。
+ * 「一度できた問題を忘れていないか」は、ランダムに引く総合演習が同じ確率で
+ * 拾うので、専用のテストを別に持つ必要がなかった（`apps/liff/src/grammar.ts` 冒頭）。
+ *
+ * 関数名と列名（`checkup_score` 等）は据え置き。改名の影響が管理画面まで及ぶわりに
+ * 得るものが薄いため。**中身は mixed を見ている。**
+ */
 export async function getGrammarCheckupHistory(
   db: D1Database,
   friendId: string,
@@ -838,7 +767,7 @@ export async function getGrammarCheckupHistory(
   const rows = await db
     .prepare(
       `SELECT finished_at AS at, total, correct FROM grammar_sessions
-       WHERE friend_id = ? AND book_id = ? AND kind = 'checkup'
+       WHERE friend_id = ? AND book_id = ? AND kind = 'mixed'
        ORDER BY finished_at DESC, id DESC LIMIT ?`,
     )
     .bind(friendId, bookId, limit)
@@ -933,7 +862,8 @@ export async function getGrammarDashboard(
   const recentRows = await db
     .prepare(
       `SELECT finished_at AS at, total, correct, kind
-       FROM grammar_sessions WHERE friend_id = ? AND kind NOT IN ('retry', 'checkup')
+       -- 総合演習(mixed)はスコアカードで別に見せるので、直近の推移からは外す
+       FROM grammar_sessions WHERE friend_id = ? AND kind NOT IN ('retry', 'mixed')
        ORDER BY finished_at DESC, id DESC LIMIT 10`,
     )
     .bind(friendId)

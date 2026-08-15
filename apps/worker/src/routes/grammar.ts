@@ -15,7 +15,6 @@ import {
   getGrammarBooks,
   getGrammarBookById,
   getCategoryTestQuestions,
-  getCheckupQuestions,
   getMixedQuestions,
   getReviewQuestions,
   getGrammarDashboard,
@@ -47,9 +46,7 @@ export const grammar = new Hono<Env>();
  */
 const MAX_QUESTIONS_PER_REQUEST = 100;
 const MAX_REVIEW_QUESTIONS = 20;
-/** 実力テストで選べる問題数。多いほど点が安定する。 */
-const CHECKUP_SIZES = [20, 30, 50];
-/** 総合演習で選べる問題数。練習なので実力テストより多めまで許す。 */
+/** 総合演習で選べる問題数。多いほどスコアが安定する。 */
 const MIXED_SIZES = [20, 30, 50];
 
 // ── 生徒用 ──────────────────────────────────────────────────────────────────
@@ -159,40 +156,17 @@ grammar.get('/api/grammar/review', async (c) => {
 });
 
 /**
- * 総復習テスト（旧「実力テスト」）。
- *
- * **実力は測っていない。仕事は忘れの検出。** 最後に正解してから古い問題を優先して引く
- * （理由は `packages/db/src/grammar.ts` の getCheckupQuestions を読むこと）。
- *
- * 範囲を絞らないので上の範囲チェックは通らない。ここは問題数を CHECKUP_SIZES に
- * 固定することで「全件取得の経路を作らない」線引きを守る。
- */
-grammar.get('/api/grammar/checkup', async (c) => {
-  const gate = await requireStudent(c, 'grammar');
-  if (!gate.ok) {
-    const d = denied(gate.status);
-    return c.json(d.body, d.status);
-  }
-  const bookId = Number(c.req.query('book_id'));
-  if (!bookId) return c.json({ success: false, error: 'book_id は必須です' }, 400);
-
-  const size = CHECKUP_SIZES.includes(Number(c.req.query('size')))
-    ? Number(c.req.query('size'))
-    : CHECKUP_SIZES[0];
-  const questions = await getCheckupQuestions(c.env.DB, gate.friend.id, bookId, size);
-  return c.json({ success: true, questions });
-});
-
-/**
  * ある分野の単元一覧（定着率つき）。
  *
  * ダッシュボードに全単元（140）を積むとホームの応答が重くなるだけなので、
  * 分野を掘ったときにここだけ取りに来る。
  */
 /**
- * 総合演習。分野をまたいで通しで解く練習用。
+ * 総合演習。分野をまたいでランダムに引く。**スコアを測るのはこれ。**
  *
- * 総復習テスト（`/checkup`）は古い問題に偏らせてあるので練習には向かない。
+ * 2026-08-15 に総復習テスト（`/checkup`・stale-first）を廃止してここに一本化した。
+ * ランダムに引く以上、忘れた問題も未挑戦の問題も同じ確率で当たるので、
+ * このスコアだけで「問題集の完成度」と「できているつもり」の両方が見える。
  * こちらは全分野からただランダムに引く。
  */
 grammar.get('/api/grammar/mixed', async (c) => {
@@ -297,6 +271,8 @@ grammar.post('/api/grammar/sessions', async (c) => {
   const book = await getGrammarBookById(c.env.DB, body.book_id);
   if (!book) return c.json({ success: false, error: '問題集が見つかりません' }, 404);
 
+  // 'checkup' は 2026-08-15 廃止。古いLIFFがキャッシュから送ってくる可能性があるので
+  // 受け口だけ残す（弾くと記録が消えるだけで、生徒には何も伝わらない）。
   const kind = ['normal', 'review', 'retry', 'checkup', 'mixed'].includes(body.kind || '')
     ? (body.kind as string)
     : 'normal';
