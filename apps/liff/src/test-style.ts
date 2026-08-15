@@ -254,6 +254,13 @@ details.v-adv > div{padding-bottom:16px}
 .v-qno{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.2em;color:var(--fg3);
   font-weight:500;margin-bottom:14px}
 .v-qword{font-size:var(--q);font-weight:700;line-height:1.35;letter-spacing:-.025em;word-break:break-word}
+/* 例文穴埋め。単語1語より文が長いので、行間を広げて読ませる */
+.v-cloze{font-size:20px;font-weight:600;line-height:1.75;letter-spacing:-.01em;text-align:left;
+  word-break:normal;overflow-wrap:break-word;max-width:34em;margin:0 auto}
+.v-blank{display:inline-block;width:5.5em;height:1.05em;vertical-align:-.16em;margin:0 .18em;
+  border-bottom:2.5px solid var(--lime);border-radius:1px}
+.v-cja{font-size:14px;font-weight:500;line-height:1.7;color:var(--fg2);text-align:left;
+  max-width:34em;margin:10px auto 0}
 .v-reveal{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
 .v-aword{font-size:var(--a);font-weight:600;color:var(--lime);line-height:1.5}
 .v-opts{display:grid;gap:8px;margin:20px 0 0}

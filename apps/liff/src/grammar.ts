@@ -329,9 +329,8 @@ function injectStyles(): void {
 /* ── 出題（文法） ── */
 /* 単語は1語なので中央寄せで大きく出せるが、英文は左寄せでないと読めない */
 .g-stage{text-align:left}
-.g-cat{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.16em;
-  color:var(--fg3);font-weight:500;margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap}
-.g-cat b{font-style:normal;font-weight:700;color:var(--lime);letter-spacing:.06em}
+/* 出題画面は余白を詰める。1画面に「次へ」まで収めたい */
+.g-stage{padding:22px 18px}
 .g-q{font-size:19px;font-weight:600;line-height:1.75;letter-spacing:-.01em;word-break:normal;
   overflow-wrap:anywhere}
 .g-blank{display:inline-block;min-width:74px;border-bottom:2px solid var(--lime);
@@ -343,11 +342,11 @@ function injectStyles(): void {
  * その高さのぶん下が伸びて画面が動く。先に場所を取っておけば中身が入れ替わるだけで、
  * 問題文も選択肢も1pxも動かない。min-height は解説2〜3行ぶん。
  * これより長い解説のときだけ下に伸びる（選択肢より下なので上は動かない）。 */
-.g-exp{margin-top:18px;padding:14px;border-radius:10px;border:1px solid var(--line2);
-  background:var(--surface2);font-size:14px;line-height:1.85;color:var(--fg2);text-align:left;
-  min-height:142px}
-.g-exp.waiting{display:flex;align-items:center;justify-content:center;
-  background:transparent;border-style:dashed;color:var(--fg3);font-size:12.5px}
+.g-exp{margin-top:16px;padding:13px;border-radius:10px;border:1px solid var(--line2);
+  background:var(--surface2);font-size:14px;line-height:1.75;color:var(--fg2);text-align:left;
+  height:126px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+/* 未回答のあいだは枠だけ。文言を置くと目に入るぶんノイズになる */
+.g-exp.waiting{background:transparent;border-color:var(--line)}
 .g-exp b{display:block;font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.18em;
   color:var(--fg3);font-weight:500;margin-bottom:7px}
 .g-exp .ans{color:var(--lime);font-weight:700}
@@ -1082,14 +1081,9 @@ function renderQuestion(): void {
   const body = `
 <div class="v-stage g-stage">
   <div class="v-tbar${cfg.tmr ? '' : ' v-hide'}" id="gTbar"><i id="gTfill"></i><b id="gTleft"></b></div>
-  <div class="g-cat">
-    <span>NO. ${no3(q.no)}</span>
-    <b>${esc(q.category)}</b>
-    ${q.sub_category ? `<span>${esc(q.sub_category)}</span>` : ''}
-  </div>
   <div class="g-q">${renderPrompt(q.prompt)}</div>
   <div class="v-opts" id="gOpts"></div>
-  ${quiet ? '' : `<div class="g-exp waiting" id="gExp">選ぶと解説が出ます</div>`}
+  ${quiet ? '' : `<div class="g-exp waiting" id="gExp"></div>`}
 </div>
 ${
   quiet
@@ -1170,13 +1164,15 @@ function settle(chosen: number | null): void {
 
   // 解説は正解でも出す。合っていても理由が違っていることがある。
   // 枠は最初から置いてあるので、中身を差し替えるだけ。**スクロールも送らない。**
+  // 分野・単元は出題中は伏せている（単元名が答えのヒントになる）ので、ここで出す。
+  const tag = q.sub_category ? ` · ${esc(q.sub_category)}` : ` · ${esc(q.category)}`;
   const exp = document.getElementById('gExp')!;
   exp.className = 'g-exp' + (q.explanation ? '' : ' none');
   exp.innerHTML = q.explanation
-    ? `<b>解説</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span><br>${esc(
+    ? `<b>解説${tag}</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span><br>${esc(
         q.explanation,
       ).replace(/\n/g, '<br>')}`
-    : `<b>解説</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span>`;
+    : `<b>解説${tag}</b>正解は <span class="ans">${esc(q.choices[q.answer])}</span>`;
 
   // ボタンも最初から置いてある。見えるようにするだけ（領域は既に取ってある）。
   document.getElementById('gActs')!.classList.add('on');

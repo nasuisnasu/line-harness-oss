@@ -33,6 +33,11 @@ export interface VocabWord {
   en: string;
   ja: string;
   section: string | null;
+  /** 例文穴埋め用。空所は ___ 。原形（名詞は単数）が入る文脈だけを作ってある */
+  example: string | null;
+  example_ja: string | null;
+  /** v / n / adj / adv / prep / conj。穴埋めのダミーを同じ品詞から選ぶために持つ */
+  pos: string | null;
 }
 
 export interface VocabSession {
@@ -112,8 +117,9 @@ const EXCLUDE_RETRY = `s2.kind <> 'retry'`;
 /**
  * 「その語の直近の解答」を1語1行で返す共通の CTE。
  *
- * choice を recall より優先する。ORDER BY の第1キー `(format = 'choice') DESC` が
- * それを担っている（SQLite では真偽が 1/0 になるので DESC で choice が先頭に来る）。
+ * 客観式（`choice` = 4択、`cloze` = 例文穴埋め）を `recall`（自己採点）より優先する。
+ * ORDER BY の第1キーがそれを担っている（SQLite では真偽が 1/0 になるので DESC で先頭に来る）。
+ * cloze を choice と同格にするのは、どちらも他人が採点しても同じ結果になるため。
  * answered_at が同値になる同一セッション内は id の降順で解決する。
  */
 const LATEST_ANSWER_CTE = `
@@ -121,7 +127,7 @@ const LATEST_ANSWER_CTE = `
     SELECT a.word_id, a.ok, a.answered_at,
            ROW_NUMBER() OVER (
              PARTITION BY a.word_id
-             ORDER BY (a.format = 'choice') DESC, a.answered_at DESC, a.id DESC
+             ORDER BY (a.format IN ('choice','cloze')) DESC, a.answered_at DESC, a.id DESC
            ) AS rn
     FROM vocab_answers a
     JOIN vocab_words w2 ON w2.id = a.word_id AND w2.book_id = ?2
@@ -193,15 +199,17 @@ export async function getVocabWords(
   to: number,
   limit: number,
   order: 'seq' | 'rnd',
+  clozeOnly = false,
 ): Promise<VocabWord[]> {
   const lo = Math.min(from, to);
   const hi = Math.max(from, to);
 
   const rows = await db
     .prepare(
-      `SELECT id, book_id, no, en, ja, section
+      `SELECT id, book_id, no, en, ja, section, example, example_ja, pos
        FROM vocab_words
        WHERE book_id = ? AND no BETWEEN ? AND ?
+         ${clozeOnly ? 'AND example IS NOT NULL' : ''}
        ORDER BY no ASC`,
     )
     .bind(bookId, lo, hi)
@@ -356,6 +364,7 @@ export async function getSectionTestWords(
   from: number,
   to: number,
   limit: number,
+  clozeOnly = false,
 ): Promise<VocabWord[]> {
   const lo = Math.min(from, to);
   const hi = Math.max(from, to);
@@ -363,12 +372,13 @@ export async function getSectionTestWords(
   const rows = await db
     .prepare(
       `${LATEST_ANSWER_CTE}
-       SELECT w.id, w.book_id, w.no, w.en, w.ja, w.section,
+       SELECT w.id, w.book_id, w.no, w.en, w.ja, w.section, w.example, w.example_ja, w.pos,
               CASE WHEN l.ok IS NULL THEN 2 WHEN l.ok = 0 THEN 1 ELSE 3 END AS st,
               l.answered_at AS at
        FROM vocab_words w
        LEFT JOIN latest l ON l.word_id = w.id
        WHERE w.book_id = ?2 AND w.no BETWEEN ?3 AND ?4
+         ${clozeOnly ? 'AND w.example IS NOT NULL' : ''}
        ORDER BY w.no ASC`,
     )
     .bind(friendId, bookId, lo, hi)
@@ -408,7 +418,7 @@ export async function getVocabDecoys(
   bookId: number,
   excludeIds: number[],
   count: number,
-): Promise<Pick<VocabWord, 'id' | 'en' | 'ja'>[]> {
+): Promise<Pick<VocabWord, 'id' | 'en' | 'ja' | 'pos'>[]> {
   if (count <= 0) return [];
 
   // **除外リストを SQL に渡さないこと。**
@@ -418,12 +428,12 @@ export async function getVocabDecoys(
   // 多めに引いてから JS 側で除外する。バインドは常に2個で済む。
   const rows = await db
     .prepare(
-      `SELECT id, en, ja FROM vocab_words
+      `SELECT id, en, ja, pos FROM vocab_words
        WHERE book_id = ?
        ORDER BY RANDOM() LIMIT ?`,
     )
     .bind(bookId, count + 40)
-    .all<Pick<VocabWord, 'id' | 'en' | 'ja'>>();
+    .all<Pick<VocabWord, 'id' | 'en' | 'ja' | 'pos'>>();
 
   const exclude = new Set(excludeIds);
   return rows.results.filter((w) => !exclude.has(w.id)).slice(0, count);
@@ -770,6 +780,8 @@ export interface FormatStat {
   je: number | null;
   choice: number | null;
   recall: number | null;
+  /** 例文穴埋め。4択とは測っているものが違うので分けて出す */
+  cloze: number | null;
   timeout_rate: number | null;
 }
 
@@ -836,6 +848,8 @@ export async function getVocabRecords(
          SUM(CASE WHEN a.format = 'choice' AND a.ok = 1 THEN 1 ELSE 0 END) AS ch_ok,
          SUM(CASE WHEN a.format = 'recall' THEN 1 ELSE 0 END) AS rc_n,
          SUM(CASE WHEN a.format = 'recall' AND a.ok = 1 THEN 1 ELSE 0 END) AS rc_ok,
+         SUM(CASE WHEN a.format = 'cloze' THEN 1 ELSE 0 END) AS cl_n,
+         SUM(CASE WHEN a.format = 'cloze' AND a.ok = 1 THEN 1 ELSE 0 END) AS cl_ok,
          SUM(CASE WHEN s.timer_sec > 0 THEN 1 ELSE 0 END) AS timed_n,
          SUM(CASE WHEN s.timer_sec > 0 AND a.timed_out = 1 THEN 1 ELSE 0 END) AS timed_out_n
        FROM vocab_answers a
@@ -858,6 +872,7 @@ export async function getVocabRecords(
       je: ratio(f?.je_ok, f?.je_n),
       choice: ratio(f?.ch_ok, f?.ch_n),
       recall: ratio(f?.rc_ok, f?.rc_n),
+      cloze: ratio(f?.cl_ok, f?.cl_n),
       timeout_rate: ratio(f?.timed_out_n, f?.timed_n),
     },
   };

@@ -71,6 +71,8 @@ vocab.get('/api/vocab/words', async (c) => {
   const from = Number(c.req.query('from'));
   const to = Number(c.req.query('to'));
   const order = c.req.query('order') === 'rnd' ? 'rnd' : 'seq';
+  // 例文穴埋め。例文のある語だけを出し、ダミーも同じ品詞から選べるだけ多めに渡す。
+  const cloze = c.req.query('format') === 'cloze';
   const limit = Number(c.req.query('limit') || MAX_WORDS_PER_REQUEST);
 
   // 範囲指定は必須。単語帳の全件を返す経路を作らない。
@@ -87,7 +89,9 @@ vocab.get('/api/vocab/words', async (c) => {
   try {
     // 状態（未挑戦／復習が必要／習得済み）を見て枠を配る。毎回ランダムに引くと
     // 2回目以降がただの引き直しになり、セクションが埋まらない。
-    const words = await getSectionTestWords(c.env.DB, gate.friend.id, bookId, from, to, limit);
+    const words = await getSectionTestWords(
+      c.env.DB, gate.friend.id, bookId, from, to, limit, cloze,
+    );
     if (!words.length) {
       return c.json({ success: true, words: [], decoys: [] });
     }
@@ -97,7 +101,9 @@ vocab.get('/api/vocab/words', async (c) => {
       c.env.DB,
       bookId,
       words.map((w) => w.id),
-      8,
+      // 穴埋めはダミーを正解と同じ品詞から選ぶ。全品詞まぜて8語だと、
+      // 動詞の問題に動詞のダミーが1語も残らないことがあるので多めに引く。
+      cloze ? 60 : 8,
     );
 
     return c.json({ success: true, words, decoys });
@@ -243,7 +249,9 @@ vocab.post('/api/vocab/sessions', async (c) => {
   const kind = ['normal', 'review', 'retry', 'checkup'].includes(body.kind || '')
     ? (body.kind as string)
     : 'normal';
-  const format = body.format === 'recall' ? 'recall' : 'choice';
+  // 'cloze'（例文穴埋め）も客観式として保存する。未知の値は choice に丸める。
+  const format =
+    body.format === 'recall' ? 'recall' : body.format === 'cloze' ? 'cloze' : 'choice';
   const direction = body.direction === 'je' ? 'je' : 'ej';
   const orderMode = body.order_mode === 'rnd' ? 'rnd' : 'seq';
 

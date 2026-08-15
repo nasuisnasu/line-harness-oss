@@ -40,6 +40,11 @@ interface Word {
   en: string;
   ja: string;
   section?: string | null;
+  /** 例文穴埋め用。空所は ___ 。原形（名詞は単数）が入る文脈だけを作ってある */
+  example?: string | null;
+  example_ja?: string | null;
+  /** ダミーを同じ品詞から選ぶために使う。品詞が混ざると消去法で当たる */
+  pos?: string | null;
 }
 
 interface BookSection {
@@ -118,7 +123,7 @@ const cfg = {
   from: 1,
   to: 100,
   lim: 20,
-  fmt: 'choice' as 'choice' | 'recall',
+  fmt: 'choice' as 'choice' | 'recall' | 'cloze',
   dir: 'ej' as 'ej' | 'je',
   /** 既定はランダム。番号順だと毎回おなじ並びで、順番で覚えてしまう。 */
   ord: 'rnd' as 'seq' | 'rnd',
@@ -584,8 +589,8 @@ function renderSetup(): void {
 
   const body = `
 <p class="v-sub">セクションを選ぶと、その範囲のテストが始まります。${Math.min(cfg.lim, BLOCK)}問・${
-    cfg.fmt === 'choice' ? '4択' : '意味を答える'
-  }・${cfg.dir === 'ej' ? '英→日' : '日→英'}。</p>
+    cfg.fmt === 'choice' ? '4択' : cfg.fmt === 'cloze' ? '例文穴埋め' : '意味を答える'
+  }${cfg.fmt === 'cloze' ? '' : `・${cfg.dir === 'ej' ? '英→日' : '日→英'}`}。</p>
 ${sections || '<p class="v-empty">セクションがありません。</p>'}
 
 <details class="v-adv">
@@ -605,9 +610,11 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
     <p class="v-hint" style="margin:16px 0 6px">形式</p>
     <div class="v-row">
       ${chip('fmt', 'choice', '4択', cfg.fmt === 'choice')}
+      ${chip('fmt', 'cloze', '例文穴埋め', cfg.fmt === 'cloze')}
       ${chip('fmt', 'recall', '意味を答える', cfg.fmt === 'recall')}
     </div>
-    <div class="v-row" style="margin-top:8px">
+    <!-- 穴埋めは英文の空所に語を入れる形式しかないので、方向の選択は出さない -->
+    <div class="v-row${cfg.fmt === 'cloze' ? ' v-hide' : ''}" style="margin-top:8px">
       ${chip('dir', 'ej', '英 → 日', cfg.dir === 'ej')}
       ${chip('dir', 'je', '日 → 英', cfg.dir === 'je')}
     </div>
@@ -704,7 +711,7 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
       document.querySelectorAll<HTMLElement>(`.v-chip[data-g="${g}"]`).forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       if (g === 'tmr') cfg.tmr = Number(b.dataset.v);
-      else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall';
+      else if (g === 'fmt') cfg.fmt = b.dataset.v as 'choice' | 'recall' | 'cloze';
       else if (g === 'dir') cfg.dir = b.dataset.v as 'ej' | 'je';
       else if (g === 'ord') cfg.ord = b.dataset.v as 'seq' | 'rnd';
     };
@@ -729,10 +736,11 @@ async function startNormal(): Promise<void> {
   say('');
   try {
     const res = await api<{ words: Word[]; decoys: Word[] }>(
-      `/api/vocab/words?book_id=${cfg.bookId}&from=${cfg.from}&to=${cfg.to}&limit=${cfg.lim}&order=${cfg.ord}`,
+      `/api/vocab/words?book_id=${cfg.bookId}&from=${cfg.from}&to=${cfg.to}&limit=${cfg.lim}&order=${cfg.ord}` +
+        (cfg.fmt === 'cloze' ? '&format=cloze' : ''),
     );
     if (!res.words.length) {
-      say('その範囲に単語がありません。');
+      say(cfg.fmt === 'cloze' ? 'その範囲に例文のある単語がありません。' : 'その範囲に単語がありません。');
       if (btn) btn.disabled = false;
       return;
     }
@@ -861,18 +869,26 @@ function renderQuestion(): void {
   state.shown = false;
   state.answered = false;
   const askEn = cfg.dir === 'ej';
+  const cloze = cfg.fmt === 'cloze';
 
   const body = `
 <div class="v-stage">
   <div class="v-tbar${cfg.tmr ? '' : ' v-hide'}" id="vTbar"><i id="vTfill"></i><b id="vTleft"></b></div>
   <div class="v-qno">NO. ${no3(w.no)}</div>
-  <div class="v-qword">${esc(askEn ? w.en : w.ja)}</div>
+  ${
+    cloze
+      ? `<div class="v-cloze">${clozeHtml(w.example ?? '')}</div>
+  <div class="v-reveal v-hide" id="vReveal">
+    <div class="v-cja">${esc(w.example_ja ?? '')}</div>
+  </div>`
+      : `<div class="v-qword">${esc(askEn ? w.en : w.ja)}</div>
   <div class="v-reveal v-hide" id="vReveal">
     <div class="v-aword">${esc(askEn ? w.ja : w.en)}</div>
-  </div>
+  </div>`
+  }
   <!-- 4択のときは答えを別に出さない。正解の選択肢が色で分かるうえ、
        途中で要素が増えると選択肢の位置がずれて読みづらい -->
-  <div class="v-opts${cfg.fmt === 'choice' ? '' : ' v-hide'}" id="vOpts"></div>
+  <div class="v-opts${cfg.fmt === 'recall' ? ' v-hide' : ''}" id="vOpts"></div>
 </div>
 <div class="v-acts" id="vActs"></div>
 <button class="v-abort" id="vAbort">中断する（記録は残りません）</button>`;
@@ -886,8 +902,8 @@ function renderQuestion(): void {
     void showHome();
   };
 
-  if (cfg.fmt === 'choice') renderChoice(w, askEn);
-  else renderRecall();
+  if (cfg.fmt === 'recall') renderRecall();
+  else renderChoice(w, askEn);
 
   state.qShownAt = performance.now();
   startTimer();
@@ -923,21 +939,38 @@ function shortJa(ja: string): string {
   return i > 0 ? ja.slice(0, i) : ja;
 }
 
+/** 例文の `___` を空所の見た目に変える。文字は先にエスケープしてから置き換える。 */
+function clozeHtml(ex: string): string {
+  return esc(ex).replace('___', '<i class="v-blank"></i>');
+}
+
 function renderChoice(w: Word, askEn: boolean): void {
-  const label = (c: Word) => (askEn ? shortJa(c.ja) : c.en);
+  const cloze = cfg.fmt === 'cloze';
+  // 穴埋めの選択肢は常に英単語。空所に入るのは原形（名詞は単数）だけなので、
+  // 活用形が答えを教えることはない（例文をそう作ってある）。
+  const label = (c: Word) => (cloze ? c.en : askEn ? shortJa(c.ja) : c.en);
   const answer = label(w);
 
   // **正解と同じ文言になるダミーを外す。**
   // シス単は223語（11%）が他の語と同じ語義を持つ（「すばらしい」が7語など）。
   // 選択肢に同じ文言が並ぶと、その問題は答えようがなくなる。
+  //
   const usable = (c: Word) => c.id !== w.id && label(c) !== answer;
-  const others = state.pool.filter(usable);
-  const fallback = state.decoys.filter(usable);
+  const cands = [...shuffle(state.pool.filter(usable)), ...shuffle(state.decoys.filter(usable))];
+
+  // 穴埋めでは**品詞をそろえる**。名詞の空所に動詞が並ぶと、
+  // 意味を知らなくても消去法で当たってしまう。
+  //
+  // ただし品詞は偏っている。ターゲット1900は動詞760・名詞722・形容詞405に対し、
+  // 副詞9・前置詞3・接続詞1しかない。接続詞の問題で同じ品詞のダミーは作れないので、
+  // 足りなければ品詞の条件を外して埋める。該当は1900語中13語（0.7%）。
+  const sameP = cloze && w.pos ? cands.filter((c) => c.pos === w.pos) : cands;
 
   const picked: Word[] = [];
   const seen = new Set([answer]);
-  for (const c of [...shuffle(others), ...shuffle(fallback)]) {
+  for (const c of [...sameP, ...cands]) {
     if (picked.length >= 3) break;
+    if (picked.includes(c)) continue;
     const l = label(c);
     if (seen.has(l)) continue; // ダミー同士が同じ文言になるのも避ける
     seen.add(l);
@@ -966,6 +999,8 @@ function pick(btn: HTMLButtonElement, w: Word): void {
   stopTimer();
   document.getElementById('vTbar')?.classList.add('v-hide');
   const right = Number(btn.dataset.id) === w.id;
+  // 穴埋めは正解の語が分かっても文の意味が分からないままになりうるので、和訳を出す
+  if (cfg.fmt === 'cloze') document.getElementById('vReveal')?.classList.remove('v-hide');
   document.querySelectorAll<HTMLButtonElement>('.v-opt').forEach((b) => {
     b.disabled = true;
     if (Number(b.dataset.id) === w.id) b.classList.add('ok');
@@ -1181,6 +1216,7 @@ async function showRecords(): Promise<void> {
       je: number | null;
       choice: number | null;
       recall: number | null;
+      cloze: number | null;
       timeout_rate: number | null;
     };
   };
@@ -1241,6 +1277,7 @@ async function showRecords(): Promise<void> {
       ${fRow('英→日', rec.formats.ej)}
       ${fRow('日→英', rec.formats.je)}
       ${fRow('4択', rec.formats.choice)}
+      ${fRow('例文穴埋め', rec.formats.cloze)}
       ${fRow('自己採点', rec.formats.recall)}
       ${fRow('時間切れ率', rec.formats.timeout_rate)}
     </div>`;
