@@ -1,3 +1,3 @@
-build: 2026-08-15i
+build: 2026-08-15j
 host: readash-liff.pages.dev (Cloudflare Pages)
-grammar/vocab: ホームのスコアカードを圧縮（グラフを低く・注記と2行表示を整理）
+grammar/vocab: 推移グラフを元の高さに戻し、問題数の選択をボタンの次の画面へ

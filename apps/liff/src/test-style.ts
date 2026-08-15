@@ -114,9 +114,7 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-lead .n em{font-style:normal;font-size:14px;color:var(--fg2);margin-left:4px}
 
 .v-spark{display:block;width:100%;height:118px;margin:8px 0 4px}
-/* ホームのスコアカード用。**CSSで潰すのではなく低い図形を作っている**
-   （viewBox があるので潰すと文字まで縮む）。高さはSVG側と合わせること。 */
-.v-spark.sm{height:58px;margin:6px 0 0}
+
 .v-stats{display:flex;gap:10px;flex-wrap:wrap}
 .v-stat{flex:1;min-width:92px;border:1px solid var(--line);background:var(--surface);
   border-radius:var(--r);padding:13px 14px}

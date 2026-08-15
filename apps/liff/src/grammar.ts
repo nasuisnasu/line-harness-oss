@@ -51,7 +51,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15i';
+const BUILD = '2026-08-15j';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -446,22 +446,20 @@ function renderError(msg: string, retry = true): void {
  * 分からないので意味がない。縦は0〜100%固定にする（データに合わせて伸縮させない）。
  */
 /**
- * 正答率の推移。`compact` はホームのスコアカード用に低くしたもの。
+ * 正答率の推移。
  *
- * **CSSで高さを潰さないこと。** viewBox があるので文字まで一緒に縮んで読めなくなる。
- * 低くしたいときは図形の側を作り分ける。
+ * ⚠️ **CSSで高さを潰さないこと。** viewBox があるので文字まで一緒に縮む。
+ * 一度ホーム用に 58px まで下げたが、縦軸が潰れて推移が読めなくなった。
+ * 縮めるなら図形の側を作り分ける。ただし 100px を切ると意味を失う。
  */
-function sparkline(
-  points: { rate: number; at: string; kind: string }[],
-  compact = false,
-): string {
+function sparkline(points: { rate: number; at: string; kind: string }[]): string {
   if (points.length < 2) return '';
   const W = 320;
-  const H = compact ? 58 : 118;
-  const L = compact ? 22 : 30;
+  const H = 118;
+  const L = 30;
   const R = 8;
-  const T = compact ? 6 : 8;
-  const B = compact ? 14 : 22;
+  const T = 8;
+  const B = 22;
   const iw = W - L - R;
   const ih = H - T - B;
   const x = (i: number) => L + (iw * i) / (points.length - 1);
@@ -479,13 +477,8 @@ function sparkline(
       (v) =>
         `<line x1="${L}" y1="${y(v).toFixed(1)}" x2="${W - R}" y2="${y(v).toFixed(1)}"
            stroke="var(--line2)" stroke-width="1"${v === 0.5 ? ' stroke-dasharray="3 3"' : ''}/>
-         ${
-           compact && v === 0.5
-             ? ''
-             : `<text x="${L - 5}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
-                  fill="var(--fg3)" font-size="${compact ? 8.5 : 10}"
-                  font-family="JetBrains Mono, monospace">${v * 100}</text>`
-         }`,
+         <text x="${L - 5}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
+           fill="var(--fg3)" font-size="10" font-family="JetBrains Mono, monospace">${v * 100}</text>`,
     )
     .join('');
 
@@ -499,21 +492,15 @@ function sparkline(
     )
     .join('');
 
-  return `<svg class="v-spark${compact ? ' sm' : ''}" viewBox="0 0 ${W} ${H}" role="img" aria-label="正答率の推移">
+  return `<svg class="v-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="正答率の推移">
     ${grid}
     <path d="${d}" fill="none" stroke="var(--lime)" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"/>
     ${dots}
-    ${
-      compact
-        ? ''
-        : `<text x="${L}" y="${H - 6}" fill="var(--fg3)" font-size="10"
-             font-family="JetBrains Mono, monospace">${shortDate(points[0].at)}</text>
-           <text x="${W - R}" y="${H - 6}" text-anchor="end" fill="var(--fg3)" font-size="10"
-             font-family="JetBrains Mono, monospace">${shortDate(
-               points[points.length - 1].at,
-             )}</text>`
-    }
+    <text x="${L}" y="${H - 6}" fill="var(--fg3)" font-size="10"
+      font-family="JetBrains Mono, monospace">${shortDate(points[0].at)}</text>
+    <text x="${W - R}" y="${H - 6}" text-anchor="end" fill="var(--fg3)" font-size="10"
+      font-family="JetBrains Mono, monospace">${shortDate(points[points.length - 1].at)}</text>
   </svg>`;
 }
 
@@ -528,7 +515,7 @@ function checkupCard(b: DashboardBook): string {
   const pooled = b.checkup_score;
   const latest = cs.length ? cs[cs.length - 1] : null;
   const spark =
-    cs.length >= 2 ? sparkline(cs.map((c) => ({ rate: c.score, at: c.at, kind: 'normal' })), true) : '';
+    cs.length >= 2 ? sparkline(cs.map((c) => ({ rate: c.score, at: c.at, kind: 'normal' }))) : '';
 
   if (!pooled || !latest) {
     return `
@@ -666,20 +653,16 @@ async function showHome(): Promise<void> {
       ? '<p class="v-note" style="text-align:center">やり直しが必要な問題はありません。</p>'
       : '';
 
-  const sizeChips = `<div class="v-row" style="justify-content:center;margin-top:10px">${[20, 30, 50]
-    .map(
-      (n) =>
-        `<button class="v-chip${cfg.mixedSize === n ? ' on' : ''}" data-size="${n}">${n}問</button>`,
-    )
-    .join('')}</div>`;
-
   // 主導線は総合演習。**スコアを上げることが目的なので、それを一番上に置く。**
   // 単元テストは「潰しに行く」ための手段、やり直しはその補助。
+  //
+  // **問題数はここで選ばせない。** ホームに 20/30/50 のチップを置くと、
+  // それだけで1行ぶん（約45px）使ってスコアの推移グラフを圧迫する。
+  // タップ数は変わらない（チップ→ボタン が ボタン→問題数 になるだけ）。
   const body =
     catBar() +
     checkupCard(book) +
     '<button class="v-go" id="gMixed">総合演習を受ける</button>' +
-    sizeChips +
     '<button class="v-ghost" id="gStart">単元を選んで解く</button>' +
     reviewBlock +
     (hasHistory
@@ -702,15 +685,7 @@ async function showHome(): Promise<void> {
     if (el) el.onclick = fn;
   };
   bind('gStart', () => renderSetup());
-  document.querySelectorAll<HTMLElement>('[data-size]').forEach((el) => {
-    el.onclick = () => {
-      cfg.mixedSize = Number(el.dataset.size);
-      document
-        .querySelectorAll<HTMLElement>('[data-size]')
-        .forEach((x) => x.classList.toggle('on', Number(x.dataset.size) === cfg.mixedSize));
-    };
-  });
-  bind('gMixed', () => void startMixed());
+  bind('gMixed', () => renderMixedSetup());
   bind('gReview', () => void startReview());
   bind('gSwitch', () => renderBookPicker(true));
 }
@@ -933,6 +908,29 @@ async function startNormal(): Promise<void> {
     back();
     say(e instanceof Error ? e.message : '読み込みに失敗しました');
   }
+}
+
+/**
+ * 総合演習の問題数を選ぶ画面。
+ *
+ * ホームにチップを並べるのをやめてここに移した。ホームは推移グラフを
+ * 見せる場所なので、選択肢で行を使いたくない。
+ * ここなら「何のテストか」も一緒に書けるので、初めての生徒にも伝わる。
+ */
+function renderMixedSetup(): void {
+  const body = `
+<p class="v-sub">問題集の全範囲からランダムに出します。いま何割解けるかが分かります。<br>
+  1問20秒。解説は結果画面でまとめて読めます。</p>
+${[20, 30, 50]
+  .map((n) => `<button class="v-ghost" data-run="${n}">${n}問で受ける</button>`)
+  .join('')}
+<button class="v-switch" id="gBack">ホームに戻る</button>`;
+  app().innerHTML = shell('総合演習', '', body, '', 'test');
+  bindNav();
+  document.querySelectorAll<HTMLElement>('[data-run]').forEach((el) => {
+    el.onclick = () => void startMixed(Number(el.dataset.run));
+  });
+  document.getElementById('gBack')!.onclick = () => void showHome();
 }
 
 /**
