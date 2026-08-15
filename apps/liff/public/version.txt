@@ -1,3 +1,3 @@
-build: 2026-08-15j
+build: 2026-08-15k
 host: readash-liff.pages.dev (Cloudflare Pages)
-grammar/vocab: 推移グラフを元の高さに戻し、問題数の選択をボタンの次の画面へ
+grammar/vocab: カウントダウンの目標日を生徒が設定できるように（両テスト共通）

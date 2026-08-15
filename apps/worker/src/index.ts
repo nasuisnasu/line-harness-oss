@@ -43,6 +43,7 @@ import { businessCalendar } from './routes/business-calendar.js';
 import { pay } from './routes/pay.js';
 import { vocab } from './routes/vocab.js';
 import { grammar } from './routes/grammar.js';
+import { lms } from './routes/lms.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
 import { materialSubmissions } from './routes/material-submissions.js';
 
@@ -119,6 +120,7 @@ app.route('/', businessCalendar);
 app.route('/', pay);
 app.route('/', vocab);
 app.route('/', grammar);
+app.route('/', lms);
 app.route('/', eijakuMaterials);
 app.route('/', materialSubmissions);
 

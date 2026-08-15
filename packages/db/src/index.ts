@@ -24,6 +24,7 @@ export * from './rich-menus';
 export * from './business-calendar';
 export * from './vocab';
 export * from './grammar';
+export * from './lms-goals';
 
 /**
  * Thin wrapper around D1Database.

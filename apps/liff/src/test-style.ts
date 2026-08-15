@@ -179,7 +179,20 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 
 /* ── 猫のカウントダウン ── */
 .v-cat{display:flex;align-items:center;gap:12px;border:1px solid var(--line);
-  background:var(--surface);border-radius:14px;padding:12px 14px;margin:0 0 12px}
+  background:var(--surface);border-radius:14px;padding:12px 14px;margin:0 0 12px;
+  width:100%;text-align:left;cursor:pointer}
+.v-cat:hover{border-color:var(--line2)}
+/* 押せることが分からないと設定に辿り着けないので小さく出す */
+.v-cat .dt .ed{display:block;margin-top:3px;font-size:10px;color:var(--accent);
+  text-decoration:underline}
+
+/* 目標日の入力 */
+.v-field{display:block;margin:0 0 12px}
+.v-field span{display:block;font-size:12.5px;color:var(--fg2);margin-bottom:6px}
+.v-field input{width:100%;padding:13px 14px;font:inherit;font-size:16px;
+  background:var(--surface2);color:var(--fg);border:1px solid var(--line2);
+  border-radius:10px;outline:none}
+.v-field input:focus{border-color:var(--accent)}
 .v-cat .av{width:52px;height:52px;border-radius:50%;background:#FFF;flex:none;
   display:flex;align-items:center;justify-content:center;overflow:hidden}
 .v-cat .av img{width:44px;height:44px;object-fit:contain;display:block}

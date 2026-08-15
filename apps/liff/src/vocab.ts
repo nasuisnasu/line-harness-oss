@@ -28,6 +28,13 @@ declare const liff: {
 };
 
 import { injectTestStyles } from './test-style.js';
+import {
+  defaultGoal,
+  goalBar,
+  goalFormHtml,
+  readGoalForm,
+  type Goal,
+} from './goal.js';
 import { CAT_PNG_BASE64 } from './vocab-cat.js';
 
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
@@ -195,24 +202,8 @@ function jstNow(): string {
   return d.toISOString().slice(0, -1) + '+09:00';
 }
 
-/**
- * 次の共通テストまでの日数。
- *
- * 共通テストは「1月13日以降の最初の土曜日・日曜日」に実施される。
- * 年をまたぐので、その年の日程を過ぎていたら翌年で数え直す。
- */
-function daysToExam(now = new Date()): { days: number; date: Date } {
-  const firstSatOnOrAfter13 = (year: number): Date => {
-    const d = new Date(year, 0, 13);
-    while (d.getDay() !== 6) d.setDate(d.getDate() + 1);
-    return d;
-  };
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let exam = firstSatOnOrAfter13(today.getFullYear());
-  if (exam < today) exam = firstSatOnOrAfter13(today.getFullYear() + 1);
-  const days = Math.round((exam.getTime() - today.getTime()) / 86_400_000);
-  return { days, date: exam };
-}
+/** 目標日。未取得のあいだは既定（共通テスト）を出す。読み込みで画面を止めない。 */
+let goal: Goal = defaultGoal();
 
 function fmtDate(iso: string): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
@@ -412,18 +403,63 @@ function bookRow(book: DashboardBook): string {
 </div>`;
 }
 
+/** カウントダウン。中身は `goal.ts`（文法テストと共有）。 */
 function catBar(): string {
-  const { days, date } = daysToExam();
-  const md = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-  return `
-<div class="v-cat">
-  <span class="av"><img src="data:image/png;base64,${CAT_PNG_BASE64}" alt=""></span>
-  <span class="say">
-    <em>共通テストまで</em>
-    <b>${days}<i>日</i></b>
-  </span>
-  <span class="dt">${esc(md)}<br>（土）から</span>
-</div>`;
+  return goalBar(goal);
+}
+
+// ── 目標日（文法テストと共通） ──────────────────────────────────────────────
+
+/** ホームを描く前に取りに行く。落ちても既定で描くので画面は止めない。 */
+async function loadGoal(): Promise<void> {
+  try {
+    const res = await api<{ goal: Goal | null }>('/api/lms/goal');
+    goal = res.goal ?? defaultGoal();
+  } catch {
+    goal = defaultGoal();
+  }
+}
+
+function renderGoalSetup(): void {
+  const isDefault = goal.label === defaultGoal().label;
+  app().innerHTML = shell('カウントダウン', '', goalFormHtml(goal, isDefault), '', 'home');
+  bindNav();
+  const err = document.getElementById('goalErr')!;
+  const fail = (m: string) => {
+    err.textContent = m;
+    err.classList.remove('v-hide');
+  };
+
+  document.getElementById('goalSave')!.onclick = async () => {
+    const r = readGoalForm();
+    if (!r.goal) return fail(r.error!);
+    const btn = document.getElementById('goalSave') as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      await api('/api/lms/goal', { method: 'PUT', body: JSON.stringify(r.goal) });
+      goal = r.goal;
+      await showHome();
+    } catch (e) {
+      btn.disabled = false;
+      fail(e instanceof Error ? e.message : '保存に失敗しました');
+    }
+  };
+
+  const reset = document.getElementById('goalReset');
+  if (reset) {
+    reset.onclick = async () => {
+      (reset as HTMLButtonElement).disabled = true;
+      try {
+        await api('/api/lms/goal', { method: 'DELETE' });
+        goal = defaultGoal();
+        await showHome();
+      } catch (e) {
+        (reset as HTMLButtonElement).disabled = false;
+        fail(e instanceof Error ? e.message : '保存に失敗しました');
+      }
+    };
+  }
+  document.getElementById('goalBack')!.onclick = () => void showHome();
 }
 
 // ── 単語帳の選択 ────────────────────────────────────────────────────────────
@@ -489,6 +525,8 @@ async function showHome(): Promise<void> {
     const [booksRes, dash] = await Promise.all([
       api<{ books: Book[] }>('/api/vocab/books'),
       api<Dashboard>('/api/vocab/dashboard'),
+      // 目標日も一緒に取る。落ちても既定で描くので画面は止めない
+      loadGoal(),
     ]);
     state.books = booksRes.books;
     state.dashboard = dash;
@@ -567,6 +605,8 @@ async function showHome(): Promise<void> {
   bind('vRecords', () => void showRecords());
   bind('vReview', () => void startReview());
   bind('vSwitch', () => renderBookPicker(true));
+  // カウントダウンを押したら目標日の設定へ（単語テストと共通の設定）
+  bind('vGoalBar', () => renderGoalSetup());
 }
 
 // ── 設定 ────────────────────────────────────────────────────────────────────
