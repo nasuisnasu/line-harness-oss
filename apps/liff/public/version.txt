@@ -1,3 +1,4 @@
-build: 2026-08-15d
+build: 2026-08-15f
 host: readash-liff.pages.dev (Cloudflare Pages)
-grammar: 結果を「できなかった／できた」のタブに（入れ子スクロールを解除・全表示）
+grammar: 復習の名前衝突を解消／問題数チップを1箇所に／ホームの数字を単語と統一
+vocab: 結果を「できなかった／できた」のタブに（文法と同じ）

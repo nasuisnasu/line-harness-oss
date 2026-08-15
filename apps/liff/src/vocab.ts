@@ -137,6 +137,8 @@ const state = {
   dashboard: null as Dashboard | null,
   pool: [] as Word[],
   decoys: [] as Word[],
+  /** このテストで既にダミーとして使った語。同じ語が何度も選択肢に出るのを防ぐ */
+  usedDecoys: new Set<number>(),
   queue: [] as Word[],
   idx: 0,
   log: [] as LogEntry[],
@@ -496,11 +498,15 @@ async function showHome(): Promise<void> {
 
   const hasHistory = d.totals.sessions > 0;
 
-  // ホームの主導線は実力テスト。復習はその下の補助ボタン。
+  // ホームの主導線は実力テスト。やり直しはその下の補助ボタン。
+  // 呼び名は文法テストと揃える（同じ機能を別の名前で呼ばない）。
   const reviewBlock = book.unmastered
-    ? '<button class="v-ghost" id="vReview">復習テストを受ける</button>'
+    ? `<button class="v-ghost" id="vReview">間違えた単語をやり直す（${Math.min(
+        book.unmastered,
+        20,
+      )}語）</button>`
     : hasHistory
-      ? '<p class="v-note" style="text-align:center">復習が必要な単語はまだありません。</p>'
+      ? '<p class="v-note" style="text-align:center">やり直しが必要な単語はありません。</p>'
       : '';
 
   // ホームはスクロールなしで収める。推移・弱点語・累計は「テスト結果を見る」に置く。
@@ -800,6 +806,7 @@ function begin(words: Word[], kind: Kind, from: number | null, to: number | null
   else queue.sort((a, b) => a.no - b.no);
 
   state.pool = words.slice();
+  state.usedDecoys.clear();
   state.queue = queue;
   state.idx = 0;
   state.log = [];
@@ -955,8 +962,11 @@ function renderChoice(w: Word, askEn: boolean): void {
   // シス単は223語（11%）が他の語と同じ語義を持つ（「すばらしい」が7語など）。
   // 選択肢に同じ文言が並ぶと、その問題は答えようがなくなる。
   //
+  // **出題語とダミーは混ぜてからシャッフルする。**
+  // 出題語を先に使うと、20問のあいだ同じ20語が選択肢を埋め続ける。
+  // 実測で「20問・延べ60枠に対しダミーは22種類、最多の語は6回」まで偏っていた。
   const usable = (c: Word) => c.id !== w.id && label(c) !== answer;
-  const cands = [...shuffle(state.pool.filter(usable)), ...shuffle(state.decoys.filter(usable))];
+  const cands = shuffle([...state.pool, ...state.decoys].filter(usable));
 
   // 穴埋めでは**品詞をそろえる**。名詞の空所に動詞が並ぶと、
   // 意味を知らなくても消去法で当たってしまう。
@@ -966,9 +976,12 @@ function renderChoice(w: Word, askEn: boolean): void {
   // 足りなければ品詞の条件を外して埋める。該当は1900語中13語（0.7%）。
   const sameP = cloze && w.pos ? cands.filter((c) => c.pos === w.pos) : cands;
 
+  // このテストでまだ使っていない語を先に配る。使い切ったら再利用に落ちる。
+  const fresh = sameP.filter((c) => !state.usedDecoys.has(c.id));
+
   const picked: Word[] = [];
   const seen = new Set([answer]);
-  for (const c of [...sameP, ...cands]) {
+  for (const c of [...fresh, ...sameP, ...cands]) {
     if (picked.length >= 3) break;
     if (picked.includes(c)) continue;
     const l = label(c);
@@ -976,6 +989,7 @@ function renderChoice(w: Word, askEn: boolean): void {
     seen.add(l);
     picked.push(c);
   }
+  picked.forEach((c) => state.usedDecoys.add(c.id));
   const choices = shuffle([w, ...picked]);
 
   const labels = choices.map(label);
@@ -1075,22 +1089,71 @@ async function sendSession(): Promise<void> {
   }
 }
 
-function listBlock(title: string, arr: LogEntry[], ok: boolean): string {
-  if (!arr.length) return '';
-  return `
-<div class="v-list">
-  <h3 class="${ok ? 'o' : ''}"><em>${esc(title)}</em><span>${arr.length} 語</span></h3>
-  <ul>${arr
-    .slice()
-    .sort((a, b) => a.no - b.no)
-    .map(
-      (w) =>
-        `<li><span class="n">${no3(w.no)}</span><span class="e">${esc(w.en)}${
-          w.to ? ' <span class="t">時間切れ</span>' : ''
-        }</span><span class="j">${esc(w.ja)}</span></li>`,
-    )
-    .join('')}</ul>
-</div>`;
+/** 例文の空所を正解の語で埋めて返す。復習で読ませるのはこの形。 */
+function filledHtml(w: Word): string {
+  return esc(w.example ?? '').replace('___', `<b class="v-fill">${esc(w.en)}</b>`);
+}
+
+/**
+ * 結果の「できなかった／できた」をタブで切り替える。文法テストと同じ作り。
+ *
+ * 縦に積むと下のリストがスクロールの奥に沈む。そのうえ `.v-list ul` には
+ * `max-height` の**入れ子スクロール**があり、「全部見えていない」と感じさせていた。
+ * タブなら中を全部出せる。**既定はできなかった方**（見るべきはそちら）。
+ *
+ * 両方のパネルをDOMに置いて class を切り替えるだけなので、押しても再描画しない。
+ * スタイルは `test-style.ts` の `.v-tabs` / `.v-pane`（文法と共有）。
+ */
+function resultTabs(ng: LogEntry[], ok: LogEntry[]): string {
+  if (!ng.length && !ok.length) return '';
+  // 穴埋めのときは例文まで出す。単語と訳だけ並べても、
+  // どの文でどう使えなかったのかが分からず復習にならない。
+  const withEx = cfg.fmt === 'cloze';
+  const first = ng.length ? 'ng' : 'ok';
+  const tab = (p: 'ng' | 'ok', label: string, n: number) =>
+    n
+      ? `<button data-p="${p}" class="${first === p ? 'on' : ''}">${label}<i>${n}</i></button>`
+      : '';
+  const item = (w: LogEntry) =>
+    `<li><span class="n">${no3(w.no)}</span><span class="e">${esc(w.en)}${
+      w.to ? ' <span class="t">時間切れ</span>' : ''
+    }</span><span class="j">${esc(w.ja)}</span>${
+      withEx && w.example
+        ? `<div class="x"><p>${filledHtml(w)}</p><p class="xj">${esc(w.example_ja ?? '')}</p></div>`
+        : ''
+    }</li>`;
+  const pane = (p: 'ng' | 'ok', arr: LogEntry[]) =>
+    arr.length
+      ? `<div class="v-pane${first === p ? ' on' : ''}" data-p="${p}"><div class="v-list${
+          withEx ? ' ex' : ''
+        }"><ul>${arr
+          .slice()
+          .sort((a, b) => a.no - b.no)
+          .map(item)
+          .join('')}</ul></div></div>`
+      : '';
+  return (
+    `<div class="v-tabs" id="vTabs">${tab('ng', 'できなかった', ng.length)}${tab(
+      'ok',
+      'できた',
+      ok.length,
+    )}</div>` +
+    pane('ng', ng) +
+    pane('ok', ok)
+  );
+}
+
+function bindResultTabs(): void {
+  const tabs = document.getElementById('vTabs');
+  if (!tabs) return;
+  tabs.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-p]');
+    if (!b) return;
+    tabs.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    document
+      .querySelectorAll<HTMLElement>('.v-pane')
+      .forEach((x) => x.classList.toggle('on', x.dataset.p === b.dataset.p));
+  };
 }
 
 function renderResult(sending: boolean): void {
@@ -1107,11 +1170,11 @@ function renderResult(sending: boolean): void {
   <div class="val"><b>${pt}<i>%</i></b><u>${ok.length} / ${state.log.length} 問</u></div>
   <p class="v-note">単語帳の<b>全範囲</b>からランダムに出しています。セクションテストの点とは別物です。</p>
 </div>
-${listBlock('できなかった単語', ng, false)}
-${listBlock('できた単語', ok, true)}
+${resultTabs(ng, ok)}
 <button class="v-ghost" id="vHome">ホームに戻る</button>`;
     app().innerHTML = shell('', '実力テスト', body0, '', 'home');
     bindNav();
+    bindResultTabs();
     document.getElementById('vHome')!.onclick = () => void showHome();
     return;
   }
@@ -1134,19 +1197,20 @@ ${listBlock('できた単語', ok, true)}
   <span>正答率 ${state.log.length ? pct(ok.length / state.log.length) : '—'}</span>
 </div>
 ${delta}
-${listBlock('できなかった（復習が必要に入りました）', ng, false)}
-${listBlock('できた', ok, true)}
+${resultTabs(ng, ok)}
+${ng.length ? '<p class="v-hint" style="margin:0 0 8px">できなかった単語は復習が必要に入りました。</p>' : ''}
 <p class="v-hint" style="margin:0 0 8px">コピーは単語帳の番号順に並びます。</p>
 <div class="v-cp">
   <button id="vCp1">できなかった単語</button>
   <button id="vCp2">できた単語</button>
   <button id="vCp3">結果を全部</button>
 </div>
-${ng.length ? '<button class="v-go" id="vAgain">できなかった単語だけ、もう一度</button>' : ''}
+${ng.length ? '<button class="v-go" id="vAgain">できなかった単語を復習する</button>' : ''}
 <button class="v-ghost" id="vHome">ホームに戻る</button>`;
 
   app().innerHTML = shell('', '', body, '', 'test');
   bindNav();
+  bindResultTabs();
   const prog = document.getElementById('vProg');
   if (prog) prog.style.width = '100%';
 

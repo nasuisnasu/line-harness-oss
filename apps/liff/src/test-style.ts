@@ -140,6 +140,27 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-list li .x{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ng);margin-left:6px}
 .v-list li .t{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ng)}
 
+/* ── 結果の「できなかった／できた」タブ ──
+ * 2つのリストを縦に積むと、下のリストがスクロールの奥に沈んで見落とされる。
+ * さらに .v-list ul の max-height による**入れ子スクロール**が重なると
+ * 「全部見えていない」と感じる。タブで切り替えて中は全表示する。
+ * 単語・文法の両方で使うのでここに置く。 */
+.v-tabs{display:flex;gap:6px;margin:20px 0 12px}
+.v-tabs button{flex:1;padding:11px 12px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line2);background:var(--surface2);color:var(--fg3);
+  font-size:13.5px;font-weight:600;transition:.14s}
+.v-tabs button i{font-style:normal;font-family:"JetBrains Mono",monospace;
+  font-size:12px;margin-left:6px}
+.v-tabs button.on{background:var(--surface);color:var(--fg)}
+.v-tabs button.on[data-p="ng"]{border-color:var(--ng)}
+.v-tabs button.on[data-p="ng"] i{color:var(--ng)}
+.v-tabs button.on[data-p="ok"]{border-color:var(--lime)}
+.v-tabs button.on[data-p="ok"] i{color:var(--lime)}
+.v-pane{display:none}
+.v-pane.on{display:block}
+/* タブの中は全部見せる。入れ子スクロールを作らない */
+.v-pane .v-list ul{max-height:none;overflow:visible}
+
 /* ── 下部の固定タブ ── */
 /* LINE内ブラウザは戻る操作がしづらいので、画面間の移動は必ずここでできるようにする。 */
 .v-nav{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;
@@ -261,6 +282,13 @@ details.v-adv > div{padding-bottom:16px}
   border-bottom:2.5px solid var(--lime);border-radius:1px}
 .v-cja{font-size:14px;font-weight:500;line-height:1.7;color:var(--fg2);text-align:left;
   max-width:34em;margin:10px auto 0}
+/* 結果画面で読み返す例文。空所は正解の語で埋めて出す */
+.v-list.ex li{flex-wrap:wrap}
+.v-list.ex .x{flex:1 0 100%;margin:6px 0 2px;padding:8px 10px;border-radius:8px;
+  background:var(--surface2);border-left:2px solid var(--lime)}
+.v-list.ex .x p{margin:0;font-size:13px;line-height:1.65;color:var(--fg2);text-align:left}
+.v-list.ex .x .xj{margin-top:3px;font-size:12px;color:var(--fg3)}
+.v-fill{color:var(--lime);font-weight:700}
 .v-reveal{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
 .v-aword{font-size:var(--a);font-weight:600;color:var(--lime);line-height:1.5}
 .v-opts{display:grid;gap:8px;margin:20px 0 0}

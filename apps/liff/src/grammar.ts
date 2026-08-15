@@ -16,7 +16,8 @@
  *
  * テストは3種類。名前を混ぜないこと。
  *     単元テスト   … 単元（または分野まるごと）を選んで解く（kind='normal'）
- *     復習テスト   … 直近で間違えた問題だけ（kind='review'）
+ *     やり直し     … 直近で間違えた問題だけ（kind='review'）。
+ *                    **「復習テスト」とは呼ばない**（総復習テストと紛らわしい）
  *     総合演習     … 分野をまたいで通しで解く練習（kind='mixed'）
  *     総復習テスト … 最後に正解してから古い問題を引き直す（kind='checkup'）
  *
@@ -47,7 +48,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15d';
+const BUILD = '2026-08-15f';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -366,26 +367,6 @@ function injectStyles(): void {
 
 /* ── 結果の問題リスト ── */
 .v-list li.g-li{display:block;padding:12px 15px}
-/* ── 結果の「できなかった／できた」タブ ──
- * 2つのリストを縦に積むと、下のリストがスクロールの奥に沈んで見落とされる。
- * さらに .v-list ul には max-height:300px の**入れ子スクロール**があり、
- * 「全部見えていない感じ」になっていた。タブで切り替えて全表示する。 */
-.g-tabs{display:flex;gap:6px;margin:20px 0 12px}
-.g-tabs button{flex:1;padding:11px 12px;border-radius:9px;cursor:pointer;
-  border:1px solid var(--line2);background:var(--surface2);color:var(--fg3);
-  font-size:13.5px;font-weight:600;transition:.14s}
-.g-tabs button i{font-style:normal;font-family:"JetBrains Mono",monospace;
-  font-size:12px;margin-left:6px}
-.g-tabs button.on{background:var(--surface);color:var(--fg)}
-.g-tabs button.on[data-p="ng"]{border-color:var(--ng)}
-.g-tabs button.on[data-p="ng"] i{color:var(--ng)}
-.g-tabs button.on[data-p="ok"]{border-color:var(--lime)}
-.g-tabs button.on[data-p="ok"] i{color:var(--lime)}
-.g-pane{display:none}
-.g-pane.on{display:block}
-/* タブの中は全部見せる。入れ子スクロールを作らない */
-.g-pane .v-list ul{max-height:none;overflow:visible}
-
 .g-li .hd{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
 .g-li .hd .n{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--fg3)}
 .g-li .hd .c{font-size:10.5px;color:var(--fg3);border:1px solid var(--line2);
@@ -653,11 +634,20 @@ async function showHome(): Promise<void> {
 
   const hasHistory = d.totals.sessions > 0;
 
-  // ホームの主導線は実力テスト。復習はその下の補助ボタン。
+  // ホームの主導線は総復習テスト。間違えた問題のやり直しはその下の補助ボタン。
+  //
+  // **「復習テスト」という名前は使わない。** 総復習テストと1文字違いで、
+  // 生徒には2つある意味が分からない。中身は
+  //   間違えた問題のやり直し … まだできていない問題を潰す
+  //   総復習テスト           … 一度できた問題を忘れていないか確かめる
+  // と正反対なので、名前もそう読めるようにする。
   const reviewBlock = book.unmastered
-    ? `<button class="v-ghost" id="gReview">復習テストを受ける（${Math.min(book.unmastered, 20)}問）</button>`
+    ? `<button class="v-ghost" id="gReview">間違えた問題をやり直す（${Math.min(
+        book.unmastered,
+        20,
+      )}問）</button>`
     : hasHistory
-      ? '<p class="v-note" style="text-align:center">復習が必要な問題はまだありません。</p>'
+      ? '<p class="v-note" style="text-align:center">やり直しが必要な問題はありません。</p>'
       : '';
 
   // 総復習テストは「前にできた問題を忘れていないか」を見るもの。
@@ -673,14 +663,11 @@ async function showHome(): Promise<void> {
     .join('')}</div>`;
 
   // 総合演習。分野を決めずに通しで解く練習。総復習テストと違って抽出に細工をしない。
-  const mixedBlock =
-    '<button class="v-ghost" id="gMixed">総合演習（分野をまたいで解く）</button>' +
-    `<div class="v-row" style="justify-content:center;margin-top:8px">${[20, 30, 50]
-      .map(
-        (n) =>
-          `<button class="v-chip${cfg.mixedSize === n ? ' on' : ''}" data-msize="${n}">${n}問</button>`,
-      )
-      .join('')}</div>`;
+  //
+  // **問題数のチップはここには置かない。** 総復習テストの下にも同じ 20/30/50 が並び、
+  // 同じ見た目の選択が2つある状態になっていた。どちらに効くのか分からない。
+  // 主導線（総復習テスト）にだけ残し、こちらは固定にして数を文言に書く。
+  const mixedBlock = `<button class="v-ghost" id="gMixed">総合演習（分野をまたいで${cfg.mixedSize}問）</button>`;
 
   // 分岐は2つだけにする。以前は3分岐で、初回の枝にだけ総合演習と復習を足し忘れていた。
   // 枝ごとにボタンを並べ直す作りが原因なので、共通部分は1か所にまとめる。
@@ -694,13 +681,18 @@ async function showHome(): Promise<void> {
       sizeChips +
       mainActions +
       '<button class="v-switch" id="gSwitch">問題集を切り替える</button>'
-    : catBar() +
-      `<div class="v-lead">
-         <div class="cap">${esc(book.name)}</div>
-         <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">${
-           hasHistory ? `習得 ${book.mastered} 問` : 'まずは1単元やってみましょう'
-         }</div>
-       </div>` +
+    : // まだ総復習テストを受けられない状態。
+      // ここも単語テストと同じく checkupCard を出す。**独自の数字を作らない。**
+      // 「習得15問」のような生の件数を1箇所だけ大きく出すと、
+      // 他の画面（％表記）と単位が揃わず、何を見ている数字なのか分からなくなる。
+      catBar() +
+      checkupCard(book) +
+      (hasHistory
+        ? ''
+        : `<div class="v-lead">
+             <div class="cap">${esc(book.name)}</div>
+             <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは1単元やってみましょう</div>
+           </div>`) +
       mainActions +
       `<p class="v-note" style="text-align:center">
          あと ${CHECKUP_MIN_MASTERED - book.mastered} 問で総復習テストが受けられます。
@@ -730,14 +722,6 @@ async function showHome(): Promise<void> {
     };
   });
   bind('gMixed', () => void startMixed());
-  document.querySelectorAll<HTMLElement>('[data-msize]').forEach((el) => {
-    el.onclick = () => {
-      cfg.mixedSize = Number(el.dataset.msize);
-      document
-        .querySelectorAll<HTMLElement>('[data-msize]')
-        .forEach((x) => x.classList.toggle('on', Number(x.dataset.msize) === cfg.mixedSize));
-    };
-  });
   bind('gReview', () => void startReview());
   bind('gSwitch', () => renderBookPicker(true));
 }
@@ -1287,14 +1271,14 @@ function resultTabs(ng: LogEntry[], ok: LogEntry[]): string {
       : '';
   const pane = (p: 'ng' | 'ok', arr: LogEntry[], withExplanation: boolean) =>
     arr.length
-      ? `<div class="g-pane${first === p ? ' on' : ''}" data-p="${p}"><div class="v-list"><ul>${arr
+      ? `<div class="v-pane${first === p ? ' on' : ''}" data-p="${p}"><div class="v-list"><ul>${arr
           .slice()
           .sort((a, b) => a.no - b.no)
           .map((l) => resultItem(l, withExplanation))
           .join('')}</ul></div></div>`
       : '';
   return (
-    `<div class="g-tabs" id="gTabs">${tab('ng', 'できなかった', ng.length)}${tab(
+    `<div class="v-tabs" id="gTabs">${tab('ng', 'できなかった', ng.length)}${tab(
       'ok',
       'できた',
       ok.length,
@@ -1313,7 +1297,7 @@ function bindResultTabs(): void {
     if (!b) return;
     tabs.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     document
-      .querySelectorAll<HTMLElement>('.g-pane')
+      .querySelectorAll<HTMLElement>('.v-pane')
       .forEach((x) => x.classList.toggle('on', x.dataset.p === b.dataset.p));
   };
 }
@@ -1333,7 +1317,7 @@ function renderResult(sending: boolean): void {
   <div class="hd"><em>総復習テスト</em></div>
   <div class="val"><b>${pt}<i>%</i></b><u>${ok.length} / ${state.log.length} 問</u></div>
   <p class="v-note">しばらく解いていない問題を選んで出しています。
-    ここで落とした問題は<b>忘れかけている</b>ということなので、復習テストに入りました。</p>
+    ここで落とした問題は<b>忘れかけている</b>ということなので、やり直しに入りました。</p>
 </div>
 ${lists}
 ${sending ? '<p class="v-hint">記録を保存しています...</p>' : ''}
@@ -1446,7 +1430,7 @@ async function showRecords(): Promise<void> {
   const kindLabel = (k: string) =>
     k === 'checkup' ? '総復習'
       : k === 'mixed' ? '総合演習'
-      : k === 'review' ? '復習'
+      : k === 'review' ? 'やり直し'
       : k === 'retry' ? 'もう一度'
       : '単元';
 
