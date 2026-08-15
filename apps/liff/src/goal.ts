@@ -52,16 +52,19 @@ export function goalDays(goal: Goal, now = new Date()): { days: number; text: st
   const t = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = Math.round((t.getTime() - today.getTime()) / 86_400_000);
+  // 曜日を改行で落とすと、その1文字だけの行ができて収まりが悪い。1行に収める。
   return {
     days,
-    text: `${t.getFullYear()}/${t.getMonth() + 1}/${t.getDate()}<br>（${WD[t.getDay()]}）`,
+    text: `${t.getFullYear()}/${t.getMonth() + 1}/${t.getDate()}（${WD[t.getDay()]}）`,
   };
 }
 
 /**
  * ホームの上に出すカウントダウン。**押すと設定画面に行ける。**
  *
- * 押せることが分からないと誰も設定を見つけないので、右下に小さく「変更」を出す。
+ * 押せることが分からないと誰も設定を見つけないので、右下に小さく印を出す。
+ * **下線つきのリンク色にはしない。** カード全体が押せるので、
+ * そこだけ別のリンクがあるように見えてしまう。
  */
 export function goalBar(goal: Goal): string {
   const { days, text } = goalDays(goal);

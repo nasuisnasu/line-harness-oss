@@ -182,9 +182,12 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   background:var(--surface);border-radius:14px;padding:12px 14px;margin:0 0 12px;
   width:100%;text-align:left;cursor:pointer}
 .v-cat:hover{border-color:var(--line2)}
-/* 押せることが分からないと設定に辿り着けないので小さく出す */
-.v-cat .dt .ed{display:block;margin-top:3px;font-size:10px;color:var(--accent);
-  text-decoration:underline}
+/* 押せることが分からないと設定に辿り着けないので小さく出す。
+   カード全体が押せるので、ここを下線つきリンクにすると別リンクに見える。 */
+.v-cat .dt .ed{display:inline-block;margin-top:5px;font-size:10px;color:var(--fg3);
+  border:1px solid var(--line2);border-radius:99px;padding:2px 8px;
+  font-family:var(--f-ja,inherit);letter-spacing:.02em}
+.v-cat:hover .dt .ed{color:var(--fg2);border-color:var(--fg3)}
 
 /* 目標日の入力 */
 .v-field{display:block;margin:0 0 12px}
@@ -203,7 +206,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
 .v-cat .say b i{font-style:normal;font-size:.48em;font-weight:700;color:var(--fg2);
   margin-left:4px;letter-spacing:0}
 .v-cat .dt{margin-left:auto;text-align:right;font-family:var(--num);
-  font-variant-numeric:tabular-nums;font-size:11px;color:var(--fg3);line-height:1.5;flex:none}
+  font-variant-numeric:tabular-nums;font-size:11px;color:var(--fg3);line-height:1.5;flex:none;
+  white-space:nowrap}
 
 /* ── セクション一覧（テストタブ） ── */
 .v-sec{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--surface);
