@@ -600,8 +600,17 @@ export const api = {
   },
   googleCalendar: {
     list: () =>
-      fetchApi<ApiResponse<{ id: string; calendarId: string; authType: string; isActive: boolean; createdAt: string }[]>>(
+      fetchApi<ApiResponse<{ id: string; calendarId: string; freeBusyCalendarIds: string[]; freeBusyExplicit: boolean; authType: string; isActive: boolean; createdAt: string }[]>>(
         '/api/integrations/google-calendar',
+      ),
+    availableCalendars: (id: string) =>
+      fetchApi<ApiResponse<{ id: string; summary: string; accessRole: string }[]>>(
+        `/api/integrations/google-calendar/${id}/available-calendars`,
+      ),
+    setFreeBusyCalendars: (id: string, calendarIds: string[]) =>
+      fetchApi<ApiResponse<{ freeBusyCalendarIds: string[] }>>(
+        `/api/integrations/google-calendar/${id}/freebusy-calendars`,
+        { method: 'PUT', body: JSON.stringify({ calendarIds }) },
       ),
     connect: (data: { calendarId: string; authType: 'access_token' | 'api_key' | 'service_account'; accessToken?: string; refreshToken?: string; apiKey?: string }) =>
       fetchApi<ApiResponse<{ id: string; calendarId: string; authType: string; isActive: boolean; createdAt: string }>>(

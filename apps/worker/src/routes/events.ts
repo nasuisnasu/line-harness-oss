@@ -8,6 +8,7 @@ import {
   getFriendByLineUserId,
   upsertFriend,
   upsertChatOnMessage,
+  freeBusyCalendarIdsOf,
 } from '@line-crm/db';
 import { GoogleCalendarClient } from '../services/google-calendar.js';
 import { getServiceAccountAccessToken } from '../services/google-sa-auth.js';
@@ -187,7 +188,7 @@ function intervalsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: nu
  * the row stores a long-lived OAuth access_token or relies on the global
  * Service Account secret (auth_type='service_account').
  */
-async function resolveCalendarAccessToken(
+export async function resolveCalendarAccessToken(
   conn: { auth_type: string; access_token: string | null },
   saJson: string | undefined,
 ): Promise<string | null> {
@@ -692,12 +693,16 @@ events.get('/api/public/events/:slug/slots', async (c) => {
       const conn = await c.env.DB
         .prepare(`SELECT * FROM google_calendar_connections WHERE id = ?`)
         .bind(config.google_calendar_connection_id)
-        .first<{ calendar_id: string; access_token: string | null; auth_type: string }>();
+        .first<{ calendar_id: string; freebusy_calendar_ids: string | null; access_token: string | null; auth_type: string }>();
       if (conn) {
         const token = await resolveCalendarAccessToken(conn, c.env.GOOGLE_SA_JSON);
         if (token) {
           try {
-            const gcal = new GoogleCalendarClient({ calendarId: conn.calendar_id, accessToken: token });
+            const gcal = new GoogleCalendarClient({
+              calendarId: conn.calendar_id,
+              accessToken: token,
+              freeBusyCalendarIds: freeBusyCalendarIdsOf(conn),
+            });
             const intervals = await gcal.getFreeBusy(fromIso, toIsoExclusive);
             // Pad GCal busy intervals with the same before/after buffer so a
             // 13:00 calendar entry blocks the prep window before it. Without

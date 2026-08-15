@@ -7,9 +7,148 @@ import Header from '@/components/layout/header'
 interface Conn {
   id: string
   calendarId: string
+  freeBusyCalendarIds: string[]
+  freeBusyExplicit: boolean
   authType: string
   isActive: boolean
   createdAt: string
+}
+
+interface AvailableCalendar {
+  id: string
+  summary: string
+  accessRole: string
+}
+
+/**
+ * Picks which calendars block booking slots. Splitting calendars by purpose
+ * (personal / lessons / consultations) means the write target alone no longer
+ * represents everything the owner is busy with, so anything unchecked here
+ * will happily be offered to someone booking a slot.
+ */
+function FreeBusyPicker({ conn, onSaved }: { conn: Conn; onSaved: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [available, setAvailable] = useState<AvailableCalendar[] | null>(null)
+  const [selected, setSelected] = useState<string[]>(conn.freeBusyCalendarIds)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const openPicker = async () => {
+    setOpen(true)
+    if (available) return
+    setLoading(true)
+    setErr('')
+    try {
+      const res = await api.googleCalendar.availableCalendars(conn.id)
+      if (res.success) setAvailable(res.data)
+      else setErr(res.error)
+    } catch {
+      setErr('カレンダー一覧の取得に失敗しました')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggle = (id: string) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
+  }
+
+  const save = async () => {
+    setSaving(true)
+    setErr('')
+    try {
+      const res = await api.googleCalendar.setFreeBusyCalendars(conn.id, selected)
+      if (res.success) {
+        setOpen(false)
+        onSaved()
+      } else {
+        setErr(res.error)
+      }
+    } catch {
+      setErr('保存に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const names = conn.freeBusyCalendarIds.map(
+    (id) => available?.find((a) => a.id === id)?.summary ?? id,
+  )
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {names.map((n) => (
+          <span key={n} className="text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
+            {n}
+          </span>
+        ))}
+        <button onClick={openPicker} className="text-[11px] text-blue-600 hover:underline">
+          変更
+        </button>
+      </div>
+      {!conn.freeBusyExplicit && (
+        <p className="text-[11px] text-amber-600 mt-1">
+          ⚠ 未設定のため書き込み先1本だけを見ています。他のカレンダーの予定は空き枠として出ます
+        </p>
+      )}
+
+      {open && (
+        <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+          <p className="text-[11px] text-gray-600 mb-2">
+            予定が入っているか確認しに行くカレンダーを選びます。チェックを外したカレンダーの予定は、予約枠として提示されます。
+          </p>
+          {loading ? (
+            <div className="text-xs text-gray-400 py-2">読み込み中...</div>
+          ) : err ? (
+            <div className="text-xs text-red-600 py-2">{err}</div>
+          ) : (
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {(available ?? []).map((cal) => (
+                <label key={cal.id} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(cal.id)}
+                    onChange={() => toggle(cal.id)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    {cal.summary}
+                    {cal.id === conn.calendarId && (
+                      <span className="ml-1 text-[10px] text-green-700">（書き込み先）</span>
+                    )}
+                    <span className="block text-[10px] text-gray-400 font-mono">{cal.id}</span>
+                  </span>
+                </label>
+              ))}
+              {available?.length === 0 && (
+                <p className="text-xs text-gray-500">
+                  カレンダーが1つも見えていません。サービスアカウントに共有されているか確認してください。
+                </p>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={save}
+              disabled={saving || loading}
+              className="px-3 py-1.5 text-xs font-medium text-white rounded disabled:opacity-50"
+              style={{ backgroundColor: '#06C755' }}
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+            <button
+              onClick={() => { setOpen(false); setSelected(conn.freeBusyCalendarIds); setErr('') }}
+              className="px-3 py-1.5 text-xs text-gray-600 bg-gray-200 hover:bg-gray-300 rounded"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function GoogleCalendarPage() {
@@ -154,7 +293,8 @@ export default function GoogleCalendarPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">Calendar ID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">書き込み先 Calendar ID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">空き判定で見るカレンダー</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">認証方式</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">状態</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">追加日時</th>
@@ -165,6 +305,9 @@ export default function GoogleCalendarPage() {
               {conns.map((c) => (
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-900 font-mono">{c.calendarId}</td>
+                  <td className="px-4 py-3 align-top min-w-[280px]">
+                    <FreeBusyPicker conn={c} onSaved={load} />
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{c.authType}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${c.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>

@@ -3,7 +3,10 @@ import { jstNow } from './utils.js';
 
 export interface GoogleCalendarConnectionRow {
   id: string;
+  /** Where booking events get written. */
   calendar_id: string;
+  /** JSON array of calendar ids consulted for conflicts. NULL = just calendar_id. */
+  freebusy_calendar_ids: string | null;
   access_token: string | null;
   refresh_token: string | null;
   api_key: string | null;
@@ -11,6 +14,22 @@ export interface GoogleCalendarConnectionRow {
   is_active: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Parses the stored JSON array, falling back to the write target alone. */
+export function freeBusyCalendarIdsOf(conn: {
+  calendar_id: string;
+  freebusy_calendar_ids: string | null;
+}): string[] {
+  if (!conn.freebusy_calendar_ids) return [conn.calendar_id];
+  try {
+    const parsed = JSON.parse(conn.freebusy_calendar_ids);
+    if (!Array.isArray(parsed)) return [conn.calendar_id];
+    const ids = parsed.filter((v): v is string => typeof v === 'string' && v.length > 0);
+    return ids.length > 0 ? ids : [conn.calendar_id];
+  } catch {
+    return [conn.calendar_id];
+  }
 }
 
 export interface CalendarBookingRow {
@@ -54,6 +73,19 @@ export async function createCalendarConnection(
 
 export async function deleteCalendarConnection(db: D1Database, id: string): Promise<void> {
   await db.prepare(`DELETE FROM google_calendar_connections WHERE id = ?`).bind(id).run();
+}
+
+/** Replaces the set of calendars consulted for conflicts. Empty list clears the override. */
+export async function updateFreeBusyCalendarIds(
+  db: D1Database,
+  id: string,
+  calendarIds: string[],
+): Promise<void> {
+  const value = calendarIds.length > 0 ? JSON.stringify(calendarIds) : null;
+  await db
+    .prepare(`UPDATE google_calendar_connections SET freebusy_calendar_ids = ?, updated_at = ? WHERE id = ?`)
+    .bind(value, jstNow(), id)
+    .run();
 }
 
 // --- 予約管理 ---

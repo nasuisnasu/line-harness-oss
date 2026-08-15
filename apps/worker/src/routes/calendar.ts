@@ -11,8 +11,11 @@ import {
   updateCalendarBookingEventId,
   getBookingsInRange,
   toJstString,
+  updateFreeBusyCalendarIds,
+  freeBusyCalendarIdsOf,
 } from '@line-crm/db';
 import { GoogleCalendarClient } from '../services/google-calendar.js';
+import { resolveCalendarAccessToken } from './events.js';
 import type { Env } from '../index.js';
 
 const calendar = new Hono<Env>();
@@ -27,6 +30,9 @@ calendar.get('/api/integrations/google-calendar', async (c) => {
       data: items.map((conn) => ({
         id: conn.id,
         calendarId: conn.calendar_id,
+        freeBusyCalendarIds: freeBusyCalendarIdsOf(conn),
+        /** false = falling back to calendar_id because nothing was picked yet */
+        freeBusyExplicit: Boolean(conn.freebusy_calendar_ids),
         authType: conn.auth_type,
         isActive: Boolean(conn.is_active),
         createdAt: conn.created_at,
@@ -35,6 +41,49 @@ calendar.get('/api/integrations/google-calendar', async (c) => {
     });
   } catch (err) {
     console.error('GET /api/integrations/google-calendar error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * Calendars visible to this connection, for the conflict-check picker.
+ * A calendar only shows up once it has been shared with the service account.
+ */
+calendar.get('/api/integrations/google-calendar/:id/available-calendars', async (c) => {
+  try {
+    const conn = await getCalendarConnectionById(c.env.DB, c.req.param('id'));
+    if (!conn) return c.json({ success: false, error: 'Calendar connection not found' }, 404);
+
+    const token = await resolveCalendarAccessToken(conn, c.env.GOOGLE_SA_JSON);
+    if (!token) return c.json({ success: false, error: 'Could not obtain a Google access token' }, 502);
+
+    const gcal = new GoogleCalendarClient({ calendarId: conn.calendar_id, accessToken: token });
+    const calendars = await gcal.listCalendars();
+    return c.json({ success: true, data: calendars });
+  } catch (err) {
+    console.error('GET /api/integrations/google-calendar/:id/available-calendars error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+/** Sets which calendars block slots. Empty array reverts to the write target alone. */
+calendar.put('/api/integrations/google-calendar/:id/freebusy-calendars', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const conn = await getCalendarConnectionById(c.env.DB, id);
+    if (!conn) return c.json({ success: false, error: 'Calendar connection not found' }, 404);
+
+    const body = await c.req.json<{ calendarIds?: unknown }>();
+    if (!Array.isArray(body.calendarIds)) {
+      return c.json({ success: false, error: 'calendarIds must be an array' }, 400);
+    }
+    const calendarIds = body.calendarIds.filter((v): v is string => typeof v === 'string' && v.length > 0);
+
+    await updateFreeBusyCalendarIds(c.env.DB, id, calendarIds);
+    const updated = await getCalendarConnectionById(c.env.DB, id);
+    return c.json({ success: true, data: { freeBusyCalendarIds: freeBusyCalendarIdsOf(updated!) } });
+  } catch (err) {
+    console.error('PUT /api/integrations/google-calendar/:id/freebusy-calendars error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
@@ -96,6 +145,7 @@ calendar.get('/api/integrations/google-calendar/slots', async (c) => {
         const gcal = new GoogleCalendarClient({
           calendarId: conn.calendar_id,
           accessToken: conn.access_token,
+          freeBusyCalendarIds: freeBusyCalendarIdsOf(conn),
         });
         // タイムゾーンオフセットを付けて ISO 形式で渡す（Asia/Tokyo = +09:00）
         const timeMin = `${date}T${String(startHour).padStart(2, '0')}:00:00+09:00`;
