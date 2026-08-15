@@ -1,3 +1,3 @@
-build: 2026-08-15c
+build: 2026-08-15d
 host: readash-liff.pages.dev (Cloudflare Pages)
-grammar: 出題中は分野・単元を伏せる／余白を詰めて「次へ」を1画面に
+grammar: 結果を「できなかった／できた」のタブに（入れ子スクロールを解除・全表示）

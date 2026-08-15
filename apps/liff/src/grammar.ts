@@ -47,7 +47,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15c';
+const BUILD = '2026-08-15d';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -366,6 +366,26 @@ function injectStyles(): void {
 
 /* ── 結果の問題リスト ── */
 .v-list li.g-li{display:block;padding:12px 15px}
+/* ── 結果の「できなかった／できた」タブ ──
+ * 2つのリストを縦に積むと、下のリストがスクロールの奥に沈んで見落とされる。
+ * さらに .v-list ul には max-height:300px の**入れ子スクロール**があり、
+ * 「全部見えていない感じ」になっていた。タブで切り替えて全表示する。 */
+.g-tabs{display:flex;gap:6px;margin:20px 0 12px}
+.g-tabs button{flex:1;padding:11px 12px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line2);background:var(--surface2);color:var(--fg3);
+  font-size:13.5px;font-weight:600;transition:.14s}
+.g-tabs button i{font-style:normal;font-family:"JetBrains Mono",monospace;
+  font-size:12px;margin-left:6px}
+.g-tabs button.on{background:var(--surface);color:var(--fg)}
+.g-tabs button.on[data-p="ng"]{border-color:var(--ng)}
+.g-tabs button.on[data-p="ng"] i{color:var(--ng)}
+.g-tabs button.on[data-p="ok"]{border-color:var(--lime)}
+.g-tabs button.on[data-p="ok"] i{color:var(--lime)}
+.g-pane{display:none}
+.g-pane.on{display:block}
+/* タブの中は全部見せる。入れ子スクロールを作らない */
+.g-pane .v-list ul{max-height:none;overflow:visible}
+
 .g-li .hd{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
 .g-li .hd .n{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--fg3)}
 .g-li .hd .c{font-size:10.5px;color:var(--fg3);border:1px solid var(--line2);
@@ -1251,17 +1271,51 @@ function resultItem(l: LogEntry, withExplanation: boolean): string {
 </li>`;
 }
 
-function listBlock(title: string, arr: LogEntry[], ok: boolean, withExplanation: boolean): string {
-  if (!arr.length) return '';
-  return `
-<div class="v-list">
-  <h3 class="${ok ? 'o' : ''}"><em>${esc(title)}</em><span>${arr.length} 問</span></h3>
-  <ul>${arr
-    .slice()
-    .sort((a, b) => a.no - b.no)
-    .map((l) => resultItem(l, withExplanation))
-    .join('')}</ul>
-</div>`;
+/**
+ * 結果の「できなかった／できた」をタブで切り替える。
+ *
+ * 縦に積むと下のリストがスクロールの奥に沈んで見落とされる。
+ * **できなかった問題を既定で開く。** 見るべきはそちらなので。
+ * 両方のパネルをDOMに置いて class で切り替えるだけなので、押しても何も再描画しない。
+ */
+function resultTabs(ng: LogEntry[], ok: LogEntry[]): string {
+  if (!ng.length && !ok.length) return '';
+  const first = ng.length ? 'ng' : 'ok';
+  const tab = (p: 'ng' | 'ok', label: string, n: number) =>
+    n
+      ? `<button data-p="${p}" class="${first === p ? 'on' : ''}">${label}<i>${n}</i></button>`
+      : '';
+  const pane = (p: 'ng' | 'ok', arr: LogEntry[], withExplanation: boolean) =>
+    arr.length
+      ? `<div class="g-pane${first === p ? ' on' : ''}" data-p="${p}"><div class="v-list"><ul>${arr
+          .slice()
+          .sort((a, b) => a.no - b.no)
+          .map((l) => resultItem(l, withExplanation))
+          .join('')}</ul></div></div>`
+      : '';
+  return (
+    `<div class="g-tabs" id="gTabs">${tab('ng', 'できなかった', ng.length)}${tab(
+      'ok',
+      'できた',
+      ok.length,
+    )}</div>` +
+    // 間違えた方だけ解説つき。できた方は確認できれば足りる
+    pane('ng', ng, true) +
+    pane('ok', ok, false)
+  );
+}
+
+function bindResultTabs(): void {
+  const tabs = document.getElementById('gTabs');
+  if (!tabs) return;
+  tabs.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-p]');
+    if (!b) return;
+    tabs.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    document
+      .querySelectorAll<HTMLElement>('.g-pane')
+      .forEach((x) => x.classList.toggle('on', x.dataset.p === b.dataset.p));
+  };
 }
 
 function renderResult(sending: boolean): void {
@@ -1269,9 +1323,7 @@ function renderResult(sending: boolean): void {
   const ng = state.log.filter((x) => !x.ok);
   const r = state.lastResult;
 
-  // 間違えた問題は解説つき。できた問題は畳んでおく（正解の確認は短くていい）。
-  const lists =
-    listBlock('できなかった問題', ng, false, true) + listBlock('できた問題', ok, true, false);
+  const lists = resultTabs(ng, ok);
 
   if (state.kind === 'checkup') {
     // 総復習テストは点数がすべて。単元の定着率の変化は出さない（測っているものが違う）。
@@ -1285,9 +1337,12 @@ function renderResult(sending: boolean): void {
 </div>
 ${lists}
 ${sending ? '<p class="v-hint">記録を保存しています...</p>' : ''}
+${ng.length ? '<button class="v-go" id="gAgain">できなかった問題を復習する</button>' : ''}
 <button class="v-ghost" id="gHome">ホームに戻る</button>`;
     app().innerHTML = shell('', '総復習テスト', body0, '', 'home');
     bindNav();
+    bindResultTabs();
+    bindRetry(ng);
     document.getElementById('gHome')!.onclick = () => void showHome();
     return;
   }
@@ -1318,7 +1373,7 @@ ${sending ? '<p class="v-hint">記録を保存しています...</p>' : ''}
 </div>
 ${delta}
 ${lists}
-${ng.length ? '<button class="v-go" id="gAgain">できなかった問題だけ、もう一度</button>' : ''}
+${ng.length ? '<button class="v-go" id="gAgain">できなかった問題を復習する</button>' : ''}
 <button class="v-ghost" id="gHome">ホームに戻る</button>`;
 
   app().innerHTML = shell('', '', body, '', 'test');
@@ -1337,23 +1392,27 @@ ${ng.length ? '<button class="v-go" id="gAgain">できなかった問題だけ�
     };
   }
 
+  bindResultTabs();
+  bindRetry(ng);
+}
+
+/** 「できなかった問題を復習する」。最初のテストとは別セッション（集計からは外れる）。 */
+function bindRetry(ng: LogEntry[]): void {
   const again = document.getElementById('gAgain');
-  if (again) {
-    again.onclick = () => {
-      // 「もう一度」は最初のテストとは別のセッションとして記録する（集計からは外れる）。
-      const questions: Question[] = ng.map((l) => ({
-        id: l.id,
-        no: l.no,
-        category: l.category,
-        sub_category: l.sub_category,
-        prompt: l.prompt,
-        choices: l.choices,
-        answer: l.answer,
-        explanation: l.explanation,
-      }));
-      begin(questions, 'retry', state.category, state.subCategory);
-    };
-  }
+  if (!again) return;
+  again.onclick = () => {
+    const questions: Question[] = ng.map((l) => ({
+      id: l.id,
+      no: l.no,
+      category: l.category,
+      sub_category: l.sub_category,
+      prompt: l.prompt,
+      choices: l.choices,
+      answer: l.answer,
+      explanation: l.explanation,
+    }));
+    begin(questions, 'retry', state.category, state.subCategory);
+  };
 }
 
 // ── 記録 ────────────────────────────────────────────────────────────────────
