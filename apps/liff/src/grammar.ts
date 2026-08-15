@@ -47,7 +47,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-14c';
+const BUILD = '2026-08-15a';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -344,6 +344,22 @@ function injectStyles(): void {
   color:var(--fg3);font-weight:500;margin-bottom:7px}
 .g-exp .ans{color:var(--lime);font-weight:700}
 .g-exp.none{color:var(--fg3);font-size:13px}
+
+/* 解説と「次へ」は下から出すシートに入れる。
+   本文の流れに差し込むと、解説の高さのぶん下が伸びて画面が動く。
+   さらにスクロールを送ると二重に動いて落ち着かない。
+   シートなら重なるだけなので、答えても問題文と選択肢が1pxも動かない。 */
+.g-sheet{position:fixed;left:0;right:0;bottom:0;z-index:60;
+  background:var(--surface);border-top:1px solid var(--line);
+  box-shadow:0 -12px 32px rgba(0,0,0,.3);
+  padding:14px 14px calc(14px + env(safe-area-inset-bottom,0px));
+  max-height:64vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  transform:translateY(101%);transition:transform .2s ease-out}
+.g-sheet.open{transform:translateY(0)}
+.g-sheet .in{max-width:860px;margin:0 auto}
+.g-sheet .g-exp{margin-top:0}
+.g-sheet .v-acts{margin-top:12px}
+@media (prefers-reduced-motion:reduce){.g-sheet{transition:none}}
 
 /* ── 分野の一覧 ── */
 /* 分野カード（.g-sec）と単元カード（.g-sec2）の両方に効かせる。
@@ -1073,10 +1089,12 @@ function renderQuestion(): void {
   </div>
   <div class="g-q">${renderPrompt(q.prompt)}</div>
   <div class="v-opts" id="gOpts"></div>
-  <div class="v-hide" id="gExp"></div>
 </div>
-<div class="v-acts" id="gActs"></div>
-<button class="v-abort" id="gAbort">中断する（記録は残りません）</button>`;
+<button class="v-abort" id="gAbort">中断する（記録は残りません）</button>
+<div class="g-sheet" id="gSheet"><div class="in">
+  <div id="gExp"></div>
+  <div class="v-acts" id="gActs"></div>
+</div></div>`;
 
   app().innerHTML = shell('', '', body, `${state.idx + 1} / ${state.queue.length}`, null);
   const prog = document.getElementById('gProg');
@@ -1159,8 +1177,17 @@ function settle(chosen: number | null): void {
   const last = state.idx >= state.queue.length - 1;
   acts.innerHTML = `<button class="pri" id="gNext">${last ? '結果を見る' : '次の問題へ'}</button>`;
   document.getElementById('gNext')!.onclick = next;
-  // 解説まで一気に読めるよう、押すところまでスクロールを送る
-  exp.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // シートを出すだけ。**スクロールは送らない。**
+  // 本文は動かないので、送ると却って「勝手に動いた」だけになる。
+  const sheet = document.getElementById('gSheet')!;
+  sheet.classList.add('open');
+
+  // シートの高さぶんだけ下に余白を足して、隠れた選択肢まで自分でスクロールできるようにする。
+  // 下に足すだけなので、いま見えているものは動かない。
+  requestAnimationFrame(() => {
+    const wrap = document.querySelector<HTMLElement>('.v-wrap');
+    if (wrap) wrap.style.paddingBottom = `${sheet.offsetHeight + 24}px`;
+  });
 }
 
 // ── 結果 ────────────────────────────────────────────────────────────────────

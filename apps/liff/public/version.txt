@@ -1,3 +1,3 @@
-build: 2026-08-14c
+build: 2026-08-15a
 host: readash-liff.pages.dev (Cloudflare Pages)
-grammar: 総合演習あり / 単元カード見出し修正ずみ
+grammar: 解説を下から出るシートに変更（答えても本文が動かない）
