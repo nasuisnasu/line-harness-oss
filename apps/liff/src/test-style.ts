@@ -243,6 +243,21 @@ details.v-adv > div{padding-bottom:16px}
 .v-switch{display:block;margin:2px 0 14px;background:none;border:none;color:var(--fg3);
   font-size:12.5px;text-decoration:underline;cursor:pointer;padding:0}
 
+/* いま使っている単語帳／問題集。以前は下線リンクをボタンの2px下に置いていて、
+   押し間違えるうえ何のためのリンクか分からなかった。
+   「何を使っているか」を見せる行にして、切り替えはその中に置く。
+   ボタンから 22px あける。主要な操作とは別物だと分かる距離が要る。 */
+.v-book{display:flex;align-items:center;gap:12px;margin:22px 0 0;padding:12px 14px;
+  border:1px solid var(--line);background:var(--surface);border-radius:var(--r)}
+.v-book .t{min-width:0;display:flex;flex-direction:column;gap:3px}
+.v-book .cap{font-size:10.5px;letter-spacing:.06em;color:var(--fg3)}
+.v-book .nm{font-size:13.5px;font-weight:600;color:var(--fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v-book button{margin-left:auto;flex:none;padding:8px 13px;border:1px solid var(--line2);
+  background:var(--surface2);color:var(--fg2);font-size:12.5px;font-weight:600;
+  border-radius:99px;cursor:pointer}
+.v-book button:active{transform:scale(.98)}
+
 /* ── 習得の内訳 ── */
 .v-note{font-size:12.5px;color:var(--fg3);line-height:1.7;margin:12px 0 0}
 

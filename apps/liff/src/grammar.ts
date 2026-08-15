@@ -539,6 +539,23 @@ function checkupCard(b: DashboardBook): string {
 }
 
 /** 共通テストまでの日数。猫にしゃべらせる。 */
+/**
+ * いま使っている問題集と、その切り替え。単語テストと同じ作り。
+ *
+ * 下線つきのテキストリンクをボタンのすぐ下に置くと、押し間違えるうえ
+ * 何のためのリンクか分からない。「いま何を使っているか」を見せる行にする。
+ */
+function bookRow(name: string): string {
+  return `
+<div class="v-book">
+  <div class="t">
+    <span class="cap">いま使っている問題集</span>
+    <span class="nm">${esc(name)}</span>
+  </div>
+  <button id="gSwitch">切り替える</button>
+</div>`;
+}
+
 function catBar(): string {
   const { days, date } = daysToExam();
   const md = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
@@ -671,7 +688,7 @@ async function showHome(): Promise<void> {
            まずは総合演習で、いまどれくらい解けるか見てみましょう。<br>
            落とした問題から、どの単元を潰すかが決まります。
          </p>`) +
-    '<button class="v-switch" id="gSwitch">問題集を切り替える</button>';
+    bookRow(book.name);
 
   app().innerHTML = shell(
     '',

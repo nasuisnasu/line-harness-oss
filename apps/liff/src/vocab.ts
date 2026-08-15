@@ -394,6 +394,24 @@ function checkupCard(b: DashboardBook): string {
 }
 
 /** 共通テストまでの日数。猫にしゃべらせる。 */
+/**
+ * いま使っている単語帳と、その切り替え。
+ *
+ * 以前は下線つきのテキストリンクをボタンの2px下に置いていた。
+ * 押し間違えるうえ、何のためのリンクか分からなかった。
+ * 「いま何を使っているか」を見せる行にして、切り替えはその中に畳む。
+ */
+function bookRow(book: DashboardBook): string {
+  return `
+<div class="v-book">
+  <div class="t">
+    <span class="cap">いま使っている単語帳</span>
+    <span class="nm">${esc(book.name)}</span>
+  </div>
+  <button id="vSwitch">切り替える</button>
+</div>`;
+}
+
 function catBar(): string {
   const { days, date } = daysToExam();
   const md = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
@@ -526,7 +544,7 @@ async function showHome(): Promise<void> {
       '<button class="v-go" id="vCheckup">実力テストを受ける</button>' +
       '<button class="v-ghost" id="vStart">セクションテストを受ける</button>' +
       reviewBlock +
-      '<button class="v-switch" id="vSwitch">単語帳を切り替える</button>'
+      bookRow(book)
     : // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
       catBar() +
       checkupCard(book) +
@@ -534,8 +552,8 @@ async function showHome(): Promise<void> {
          <div class="cap">${esc(book.name)}</div>
          <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは20語やってみましょう</div>
        </div>
-       <button class="v-go" id="vStart">セクションテストを受ける</button>
-       <button class="v-switch" id="vSwitch">単語帳を切り替える</button>`;
+       <button class="v-go" id="vStart">セクションテストを受ける</button>` +
+      bookRow(book);
 
   app().innerHTML = shell('', book.name, body);
   bindNav();
@@ -599,10 +617,9 @@ function renderSetup(): void {
     })
     .join('');
 
+  // 細かい設定を**一番上**に置く。下にあると、範囲や形式を変えたい人が
+  // セクションの一覧を全部スクロールしてから戻ることになる。
   const body = `
-<p class="v-sub" id="vSetupSub">${setupSummary()}</p>
-${sections || '<p class="v-empty">セクションがありません。</p>'}
-
 <details class="v-adv">
   <summary>範囲や形式を細かく決める</summary>
   <div>
@@ -641,6 +658,8 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
     <button class="v-go" id="vBegin">この設定ではじめる</button>
   </div>
 </details>
+<p class="v-sub" id="vSetupSub" style="margin:20px 0 12px">${setupSummary()}</p>
+${sections || '<p class="v-empty">セクションがありません。</p>'}
 <p class="v-err v-hide" id="vMsg"></p>`;
 
   app().innerHTML = shell('セクションテスト', book.name, body, '', 'test');
