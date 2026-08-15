@@ -51,7 +51,7 @@ const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
  * そのとき**いま見ているのがどのビルドか**が画面から分からないと切り分けに往復がかかる。
  * 中身を変えたらこの値も上げること。
  */
-const BUILD = '2026-08-15g';
+const BUILD = '2026-08-15i';
 
 // ── 型 ──────────────────────────────────────────────────────────────────────
 
@@ -445,14 +445,23 @@ function renderError(msg: string, retry = true): void {
  * **目盛りを必ず描く。** 軸の無い折れ線は上下しか読めず、60%なのか90%なのかが
  * 分からないので意味がない。縦は0〜100%固定にする（データに合わせて伸縮させない）。
  */
-function sparkline(points: { rate: number; at: string; kind: string }[]): string {
+/**
+ * 正答率の推移。`compact` はホームのスコアカード用に低くしたもの。
+ *
+ * **CSSで高さを潰さないこと。** viewBox があるので文字まで一緒に縮んで読めなくなる。
+ * 低くしたいときは図形の側を作り分ける。
+ */
+function sparkline(
+  points: { rate: number; at: string; kind: string }[],
+  compact = false,
+): string {
   if (points.length < 2) return '';
   const W = 320;
-  const H = 118;
-  const L = 30;
+  const H = compact ? 58 : 118;
+  const L = compact ? 22 : 30;
   const R = 8;
-  const T = 8;
-  const B = 22;
+  const T = compact ? 6 : 8;
+  const B = compact ? 14 : 22;
   const iw = W - L - R;
   const ih = H - T - B;
   const x = (i: number) => L + (iw * i) / (points.length - 1);
@@ -470,8 +479,13 @@ function sparkline(points: { rate: number; at: string; kind: string }[]): string
       (v) =>
         `<line x1="${L}" y1="${y(v).toFixed(1)}" x2="${W - R}" y2="${y(v).toFixed(1)}"
            stroke="var(--line2)" stroke-width="1"${v === 0.5 ? ' stroke-dasharray="3 3"' : ''}/>
-         <text x="${L - 5}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
-           fill="var(--fg3)" font-size="10" font-family="JetBrains Mono, monospace">${v * 100}</text>`,
+         ${
+           compact && v === 0.5
+             ? ''
+             : `<text x="${L - 5}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
+                  fill="var(--fg3)" font-size="${compact ? 8.5 : 10}"
+                  font-family="JetBrains Mono, monospace">${v * 100}</text>`
+         }`,
     )
     .join('');
 
@@ -485,15 +499,21 @@ function sparkline(points: { rate: number; at: string; kind: string }[]): string
     )
     .join('');
 
-  return `<svg class="v-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="正答率の推移">
+  return `<svg class="v-spark${compact ? ' sm' : ''}" viewBox="0 0 ${W} ${H}" role="img" aria-label="正答率の推移">
     ${grid}
     <path d="${d}" fill="none" stroke="var(--lime)" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"/>
     ${dots}
-    <text x="${L}" y="${H - 6}" fill="var(--fg3)" font-size="10"
-      font-family="JetBrains Mono, monospace">${shortDate(points[0].at)}</text>
-    <text x="${W - R}" y="${H - 6}" text-anchor="end" fill="var(--fg3)" font-size="10"
-      font-family="JetBrains Mono, monospace">${shortDate(points[points.length - 1].at)}</text>
+    ${
+      compact
+        ? ''
+        : `<text x="${L}" y="${H - 6}" fill="var(--fg3)" font-size="10"
+             font-family="JetBrains Mono, monospace">${shortDate(points[0].at)}</text>
+           <text x="${W - R}" y="${H - 6}" text-anchor="end" fill="var(--fg3)" font-size="10"
+             font-family="JetBrains Mono, monospace">${shortDate(
+               points[points.length - 1].at,
+             )}</text>`
+    }
   </svg>`;
 }
 
@@ -508,7 +528,7 @@ function checkupCard(b: DashboardBook): string {
   const pooled = b.checkup_score;
   const latest = cs.length ? cs[cs.length - 1] : null;
   const spark =
-    cs.length >= 2 ? sparkline(cs.map((c) => ({ rate: c.score, at: c.at, kind: 'normal' }))) : '';
+    cs.length >= 2 ? sparkline(cs.map((c) => ({ rate: c.score, at: c.at, kind: 'normal' })), true) : '';
 
   if (!pooled || !latest) {
     return `
@@ -523,11 +543,11 @@ function checkupCard(b: DashboardBook): string {
   <div class="hd"><em>総合演習のスコア</em><span>${esc(fmtDate(latest.at).slice(0, 5))}</span></div>
   <div class="val">
     <b>${Math.round(pooled.score * 100)}<i>%</i></b>
-    <u>直近${pooled.sessions}回・${pooled.total}問から算出<br>
-       最新は ${Math.round(latest.score * 100)}%（${latest.correct}/${latest.total}）</u>
+    <u>直近${pooled.sessions}回・${pooled.total}問／最新 ${Math.round(
+      latest.score * 100,
+    )}%</u>
   </div>
   ${spark}
-  <p class="v-note">問題集の全範囲から引いた正答率です。<b>入試の点数の予想ではありません。</b></p>
 </div>`;
 }
 
@@ -1266,7 +1286,8 @@ function renderResult(sending: boolean): void {
   <div class="hd"><em>総合演習</em></div>
   <div class="val"><b>${pt}<i>%</i></b><u>${ok.length} / ${state.log.length} 問</u></div>
   <p class="v-note">問題集の<b>全範囲</b>からランダムに出しています。
-    ここで落とした問題がいまの穴です。やり直しに入りました。</p>
+    ここで落とした問題がいまの穴です。やり直しに入りました。<br>
+    <b>入試の点数の予想ではありません。</b></p>
 </div>
 ${lists}
 ${sending ? '<p class="v-hint">記録を保存しています...</p>' : ''}

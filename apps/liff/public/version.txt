@@ -1,3 +1,3 @@
-build: 2026-08-15g
+build: 2026-08-15i
 host: readash-liff.pages.dev (Cloudflare Pages)
-grammar: 総復習テストを廃止し総合演習に一本化（スコアの出所も mixed へ）
+grammar/vocab: ホームのスコアカードを圧縮（グラフを低く・注記と2行表示を整理）
