@@ -31,6 +31,7 @@ import {
   replaceVocabWords,
   jstNow,
 } from '@line-crm/db';
+import type { VocabWordInput } from '@line-crm/db';
 import { requireStudent as gateRequireStudent, denied } from '../lib/student-gate.js';
 import type { Env } from '../index.js';
 
@@ -328,7 +329,7 @@ vocab.post('/api/vocab/admin/books', async (c) => {
     name?: string;
     lineAccountId?: string | null;
     sort?: number;
-    words?: { no: number; en: string; ja: string; section?: string | null }[];
+    words?: VocabWordInput[];
     tsv?: string;
   }>();
 
@@ -341,6 +342,14 @@ vocab.post('/api/vocab/admin/books', async (c) => {
     words = parseTsv(body.tsv);
   }
 
+  // 中身の検査。文法テストの取り込みと同じ考え方（`inspect()` in routes/grammar.ts）。
+  const checked = inspectWords(words);
+
+  // 1行でも壊れていたら**何も入れない。** 半分だけ入った状態がいちばん厄介。
+  if (checked.errors.length) {
+    return c.json({ success: false, error: '取り込めない行があります', errors: checked.errors }, 400);
+  }
+
   const book = await upsertVocabBook(c.env.DB, {
     slug: body.slug,
     name: body.name,
@@ -349,21 +358,179 @@ vocab.post('/api/vocab/admin/books', async (c) => {
   });
 
   const count = words.length ? await replaceVocabWords(c.env.DB, book.id, words) : 0;
-  return c.json({ success: true, book, imported: count });
+  return c.json({ success: true, book, imported: count, warnings: checked.warnings });
 });
 
-/** `No<TAB>単語<TAB>意味<TAB>章` を想定。カンマ区切りも受ける。 */
-function parseTsv(raw: string): { no: number; en: string; ja: string; section: string | null }[] {
-  const out: { no: number; en: string; ja: string; section: string | null }[] = [];
+/**
+ * `No<TAB>単語<TAB>意味<TAB>章<TAB>例文<TAB>例文の訳<TAB>品詞` を想定。
+ *
+ * 5列目以降（例文・訳・品詞）は省略可。**省略した列は既存の値を消さない**
+ * （`replaceVocabWords` の COALESCE）。4列だけの貼り付けで例文が全部飛ぶのを防ぐため。
+ *
+ * カンマ区切りも受けるが、例文にはカンマが入るので**例文を含む行はタブ必須**。
+ * カンマで割ってしまうと列がずれ、例文の途中が品詞として入る。
+ */
+function parseTsv(raw: string): VocabWordInput[] {
+  const out: VocabWordInput[] = [];
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const cells = line.split(/\t|,/).map((x) => x.trim());
+    const cells = (line.includes('\t') ? line.split('\t') : line.split(',')).map((x) => x.trim());
     if (cells.length < 2) continue;
     if (/^\d+$/.test(cells[0]) && cells.length >= 3) {
-      out.push({ no: Number(cells[0]), en: cells[1], ja: cells[2], section: cells[4] || cells[3] || null });
+      out.push({
+        no: Number(cells[0]),
+        en: cells[1],
+        ja: cells[2],
+        section: cells[3] || null,
+        example: cells[4] || null,
+        exampleJa: cells[5] || null,
+        pos: cells[6] || null,
+      });
     } else {
       out.push({ no: out.length + 1, en: cells[0], ja: cells[1], section: cells[2] || null });
     }
   }
   return out;
+}
+
+/** 品詞。穴埋めのダミーを同じ品詞から選ぶので、揃っていないと消去法で当たる。 */
+const VOCAB_POS = new Set(['v', 'n', 'adj', 'adv', 'prep', 'conj']);
+
+/**
+ * 取り込む語の検査。
+ *
+ * 規則の正本は `.company/英弱ニキ/lms/vocab/12-cloze.md`。
+ * 生成した手元で先に回せるよう、同じ規則が
+ * `.claude/skills/kyozai-doublecheck/scripts/check.mjs` にもある。
+ * **片方だけ直すとずれる。**
+ *
+ * エラーと警告の分け方は文法テストに揃える。
+ *   エラー … 投入自体が失敗する／答えが読めてしまう。弾く
+ *   警告   … 入るが「消去法で解けるかもしれない」。人が見て判断する
+ *
+ * 語義の重複率や品詞ごとの語数は**単語帳ぜんぶ**でしか意味を持たない。
+ * ダミーは単語帳全体から引くので、少量ずつ入れると判定できない。
+ */
+function inspectWords(words: VocabWordInput[]): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!words.length) return { errors, warnings };
+
+  const norm = (s: string | null | undefined) =>
+    String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+  const seenNo = new Set<number>();
+  const seenEn = new Map<string, number>();
+  const jaGroups = new Map<string, number[]>();
+  const posCount = new Map<string, number>();
+
+  const dupEn: number[] = [];
+  const noBlank: number[] = [];
+  const aAnLeak: number[] = [];
+  const inflected: number[] = [];
+  const suffixLeak: number[] = [];
+  const noExampleJa: number[] = [];
+  const badPos: number[] = [];
+  let withExample = 0;
+
+  const summarize = (nos: number[], message: string) => {
+    if (!nos.length) return;
+    const head = nos.slice(0, 10).join(', ');
+    warnings.push(`${message}（${nos.length}語：No.${head}${nos.length > 10 ? ' ほか' : ''}）`);
+  };
+
+  for (const w of words) {
+    const at = `No.${w.no}`;
+
+    // ── エラー ──
+    if (!Number.isInteger(w.no) || w.no < 1) {
+      errors.push(`${at}: 語番号は1以上の整数にしてください`);
+      continue;
+    }
+    if (seenNo.has(w.no)) {
+      errors.push(`${at}: 語番号が重複しています。UNIQUE(book_id, no) に当たります`);
+      continue;
+    }
+    seenNo.add(w.no);
+    if (!w.en?.trim() || !w.ja?.trim()) {
+      errors.push(`${at}: 単語と意味は空にできません`);
+      continue;
+    }
+
+    // 同じ語が2回。多義語を別番号で持つ単語帳は実在するのでエラーにはしない
+    const ek = norm(w.en);
+    if (seenEn.has(ek)) dupEn.push(w.no);
+    else seenEn.set(ek, w.no);
+
+    const jk = norm(w.ja);
+    if (!jaGroups.has(jk)) jaGroups.set(jk, []);
+    jaGroups.get(jk)!.push(w.no);
+
+    // ── 例文（cloze）──
+    if (!w.example?.trim()) continue;
+    withExample++;
+    const ex = w.example;
+
+    if (!/_{2,}/.test(ex)) {
+      noBlank.push(w.no);
+      continue;
+    }
+    // 答えが文中にそのまま書いてある。この語の穴埋めは成立しない
+    const escaped = ek.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(ex)) {
+      errors.push(`${at}: 例文に「${w.en}」がそのまま出ています。答えが読めてしまいます`);
+      continue;
+    }
+    // 空所の直前の a / an。母音か子音かで答えが絞れる
+    if (/\b(a|an)\s+_{2,}/i.test(ex)) aAnLeak.push(w.no);
+    // 空所には必ず原形（名詞は単数）が入る文脈にする。活用形が答えを教えるため
+    if (w.pos === 'v' && /\b(has|have|had|was|were|is|are|been|being)\s+_{2,}/i.test(ex)) {
+      inflected.push(w.no);
+    }
+    if (w.pos === 'n' && /\b(many|several|few|two|three|both|various)\s+_{2,}/i.test(ex)) {
+      inflected.push(w.no);
+    }
+    // 空所の直後に語尾が残っている（___ing / ___ed / ___s）。形が答えを教える
+    if (/_{2,}(ing|ed|es|s)\b/i.test(ex)) suffixLeak.push(w.no);
+
+    if (!w.exampleJa?.trim()) noExampleJa.push(w.no);
+    if (!w.pos || !VOCAB_POS.has(w.pos)) badPos.push(w.no);
+    else posCount.set(w.pos, (posCount.get(w.pos) ?? 0) + 1);
+  }
+
+  // 同じ語義を持つ語。4択で「正解と同文言のダミー」が出る母数になる
+  const dupJa = [...jaGroups.values()].filter((v) => v.length > 1);
+  if (dupJa.length) {
+    const affected = dupJa.reduce((a, v) => a + v.length, 0);
+    const worst = dupJa.sort((a, b) => b.length - a.length)[0];
+    warnings.push(
+      `同じ語義を持つ語が ${affected}語（${Math.round((affected / words.length) * 100)}%）あります。` +
+        `最多は${worst.length}語が同一（No.${worst.slice(0, 6).join(', ')}）`,
+    );
+  }
+
+  summarize(dupEn, '同じ単語が2回出てきます。多義語を分けているのでなければ番号を確認してください');
+  summarize(noBlank, '例文に空所 ___ がありません');
+  summarize(aAnLeak, '空所の直前に a / an があります。母音か子音かで答えが絞れます');
+  summarize(inflected, '空所に原形（名詞は単数）が入らない文脈です。活用形が答えを教えます');
+  summarize(suffixLeak, '空所の直後に語尾（ing / ed / s）が残っています');
+  summarize(noExampleJa, '例文の訳がありません。結果画面で復習に使えません');
+  summarize(badPos, `品詞が未設定か想定外の値です（${[...VOCAB_POS].join(' / ')}）。同品詞のダミーを選べません`);
+
+  // 同品詞のダミーが3つ揃わない品詞。**単語帳ぶん揃っていないと判定できない**
+  if (withExample >= 10) {
+    for (const [pos, count] of posCount) {
+      if (count < 4) {
+        warnings.push(
+          `品詞「${pos}」の例文つき語が ${count}語しかありません。同品詞のダミーを3つ揃えられず、品詞混在の選択肢になります`,
+        );
+      }
+    }
+  } else if (withExample > 0) {
+    warnings.push(
+      `例文つきの語が ${withExample}語しかないので、品詞ごとのダミー不足を判定していません。単語帳ぶんまとめて投入してください`,
+    );
+  }
+
+  return { errors, warnings };
 }

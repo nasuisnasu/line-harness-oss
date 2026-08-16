@@ -1289,12 +1289,30 @@ export async function upsertVocabBook(
     .first<VocabBook>()) as VocabBook;
 }
 
+export interface VocabWordInput {
+  no: number;
+  en: string;
+  ja: string;
+  section?: string | null;
+  /** 例文穴埋め用。空所は ___ 。省略すると既存の例文を残す（消さない） */
+  example?: string | null;
+  exampleJa?: string | null;
+  /** v / n / adj / adv / prep / conj */
+  pos?: string | null;
+}
+
 export async function replaceVocabWords(
   db: D1Database,
   bookId: number,
-  words: { no: number; en: string; ja: string; section?: string | null }[],
+  words: VocabWordInput[],
 ): Promise<number> {
   // 既存の語を消すと vocab_answers の参照が壊れるので、消さずに上書きする。
+  //
+  // ★ 例文・訳・品詞は **COALESCE で守る。**
+  //   単語帳の投入は「No/単語/意味/章」の4列だけで来ることが多い（管理画面の貼り付け）。
+  //   そこで excluded.example をそのまま入れると、1900語ぶんの例文が一度の投入で
+  //   全部 NULL になる。しかも投入は成功扱いなので、生徒が穴埋めを開くまで気づけない。
+  //   消したいときは d1 execute で明示的に NULL を入れること。
   const CHUNK = 50;
   let n = 0;
   for (let i = 0; i < words.length; i += CHUNK) {
@@ -1303,13 +1321,25 @@ export async function replaceVocabWords(
       chunk.map((w) =>
         db
           .prepare(
-            `INSERT INTO vocab_words (book_id, no, en, ja, section)
-             VALUES (?,?,?,?,?)
+            `INSERT INTO vocab_words (book_id, no, en, ja, section, example, example_ja, pos)
+             VALUES (?,?,?,?,?,?,?,?)
              ON CONFLICT(book_id, no) DO UPDATE SET en = excluded.en,
                                                     ja = excluded.ja,
-                                                    section = excluded.section`,
+                                                    section = excluded.section,
+                                                    example = COALESCE(excluded.example, vocab_words.example),
+                                                    example_ja = COALESCE(excluded.example_ja, vocab_words.example_ja),
+                                                    pos = COALESCE(excluded.pos, vocab_words.pos)`,
           )
-          .bind(bookId, w.no, w.en, w.ja, w.section ?? null),
+          .bind(
+            bookId,
+            w.no,
+            w.en,
+            w.ja,
+            w.section ?? null,
+            w.example ?? null,
+            w.exampleJa ?? null,
+            w.pos ?? null,
+          ),
       ),
     );
     n += chunk.length;

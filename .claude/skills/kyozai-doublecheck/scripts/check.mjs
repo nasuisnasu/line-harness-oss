@@ -287,7 +287,7 @@ function checkVocab(words, report) {
 
   const noExample = [];
   const noBlank = [];
-  const enInExample = [];
+  const dupEn = [];
   const aAnLeak = [];
   const inflected = [];
   const suffixLeak = [];
@@ -299,13 +299,16 @@ function checkVocab(words, report) {
     const at = `No.${w.no}`;
 
     // ── エラー ──
-    if (seenNo.has(w.no)) { report.err(`${at}: 語番号が重複しています`); report.suspect(w.no); continue; }
+    if (!Number.isInteger(w.no) || w.no < 1) { report.err(`${at}: 語番号は1以上の整数にしてください`); continue; }
+    if (seenNo.has(w.no)) { report.err(`${at}: 語番号が重複しています。UNIQUE(book_id, no) に当たります`); report.suspect(w.no); continue; }
     seenNo.set(w.no, true);
     if (!w.en || !w.ja) { report.err(`${at}: 単語と意味は空にできません`); report.suspect(w.no); continue; }
 
+    // 同じ語が2回。多義語を別番号で持つ単語帳は実在するのでエラーにはしない
+    // （サーバー側の inspectWords と同じ扱い。片方だけ厳しくするとずれる）
     const ek = norm(w.en);
-    if (seenEn.has(ek)) { report.err(`${at}: 「${w.en}」が No.${seenEn.get(ek)} と重複しています`); report.suspect(w.no); continue; }
-    seenEn.set(ek, w.no);
+    if (seenEn.has(ek)) dupEn.push(w.no);
+    else seenEn.set(ek, w.no);
 
     // 語義の重複は4択のダミーに効いてくる。エラーではないが母数を出す
     const jk = norm(w.ja);
@@ -355,6 +358,8 @@ function checkVocab(words, report) {
       `出題時に正解と同文言のダミーを外す実装が要ります（既に入っているかを確認）`,
     );
   }
+
+  report.summarize(dupEn, '同じ単語が2回出てきます。多義語を分けているのでなければ番号を確認してください');
 
   if (withExample === 0) {
     report.warn('例文が1件もありません。例文穴埋め（cloze）を作らないバッチならこれで正常です');

@@ -28,6 +28,7 @@ import {
   getGrammarQuestions,
   getUnitMastery,
   getGrammarDistractors,
+  getDeadDistractors,
   upsertGrammarBook,
   replaceGrammarQuestions,
   jstNow,
@@ -368,6 +369,26 @@ grammar.get('/api/grammar/admin/distractors', async (c) => {
     Number(c.req.query('limit')) || 30,
   );
   return c.json({ success: true, distractors });
+});
+
+/**
+ * 一度も選ばれていない誤答（＝直すべき問題）の一覧。
+ *
+ * 上の `/distractors` は「間違えた問題」を見る画面なので、全員が正解した問題は出てこない。
+ * ところが誤答の作りが悪い問題ほど全員正解になりやすいので、そこからは見えない。
+ * こちらは逆に「選ばれなかった誤答」を主役にする。教材を作り直すときの入口。
+ *
+ * min_asked は既定5。3回しか出していない誤答が0回なのは当たり前で、
+ * 混ぜると本当に死んでいる誤答が埋もれる。
+ */
+grammar.get('/api/grammar/admin/dead-distractors', async (c) => {
+  const bookId = Number(c.req.query('book_id'));
+  if (!bookId) return c.json({ success: false, error: 'book_id は必須です' }, 400);
+  const dead = await getDeadDistractors(c.env.DB, bookId, {
+    minAsked: Number(c.req.query('min_asked')) || 5,
+    limit: Number(c.req.query('limit')) || 50,
+  });
+  return c.json({ success: true, dead });
 });
 
 /**

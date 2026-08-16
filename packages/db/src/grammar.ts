@@ -1490,6 +1490,119 @@ export async function getGrammarDistractors(
   });
 }
 
+/**
+ * 一度も選ばれていない誤答の一覧（問題を直すための材料）。
+ *
+ * `getGrammarDistractors` は「間違えた問題」を間違い順に見る講師用の画面で、
+ * `HAVING wrong > 0` が入っている。そのため**全員が正解した問題は出てこない。**
+ * ところが誤答の作りが悪い問題ほど全員正解になりやすく、いちばん直したい問題が
+ * いちばん見えないことになる。ここは逆に「選ばれなかった誤答」を主役にする。
+ *
+ * 4択問題は生徒の頭の中についての4つの仮説（`062_grammar_distractors.sql`）。
+ * 誰も選ばない誤答は枠の無駄で、その問題は実質3択になっている。
+ * これは生徒の問題ではなく**こちらの問題**で、打ち手は「問題を直す」。
+ *
+ * `minAsked` を下回る問題は返さない。3回しか出題していない誤答が0回なのは当たり前で、
+ * 混ぜると本当に死んでいる誤答が埋もれる。
+ */
+export interface DeadDistractor {
+  question_id: number;
+  no: number;
+  category: string;
+  sub_category: string | null;
+  prompt: string;
+  choices: string[];
+  answer: number;
+  asked: number;
+  picks: number[];
+  /** 一度も選ばれていない誤答の添字 */
+  dead: number[];
+  /** 死んだ誤答に付いていた勘違いのラベル（添字 → 説明）。書いた仮説が外れた記録になる */
+  dead_notes: Record<string, string>;
+}
+
+export async function getDeadDistractors(
+  db: D1Database,
+  bookId: number,
+  opts: { minAsked?: number; limit?: number } = {},
+): Promise<DeadDistractor[]> {
+  const minAsked = opts.minAsked ?? 5;
+  const limit = opts.limit ?? 50;
+
+  const rows = await db
+    .prepare(
+      `SELECT q.id AS question_id, q.no, q.category, q.sub_category, q.prompt, q.choices, q.answer,
+              q.distractor_notes,
+              COUNT(*) AS asked,
+              json_group_array(a.chosen) AS chosen_list
+       FROM grammar_answers a
+       JOIN grammar_questions q ON q.id = a.question_id
+       JOIN grammar_sessions s2 ON s2.id = a.session_id AND ${EXCLUDE_RETRY}
+       WHERE q.book_id = ?
+       GROUP BY q.id
+       HAVING asked >= ?
+       ORDER BY q.no ASC`,
+    )
+    .bind(bookId, minAsked)
+    .all<{
+      question_id: number;
+      no: number;
+      category: string;
+      sub_category: string | null;
+      prompt: string;
+      choices: string;
+      answer: number;
+      distractor_notes: string | null;
+      asked: number;
+      chosen_list: string;
+    }>();
+
+  const out: DeadDistractor[] = [];
+  for (const r of rows.results) {
+    let choices: string[] = [];
+    try {
+      const p = JSON.parse(r.choices);
+      if (Array.isArray(p)) choices = p.map((x) => String(x));
+    } catch {
+      continue; // 選択肢が読めない問題は判定しようがない
+    }
+    const picks = new Array<number>(choices.length).fill(0);
+    try {
+      const list = JSON.parse(r.chosen_list) as (number | null)[];
+      for (const ch of list) {
+        if (ch !== null && ch >= 0 && ch < picks.length) picks[ch]++;
+      }
+    } catch {
+      continue;
+    }
+    const answer = r.answer >= 0 && r.answer < choices.length ? r.answer : 0;
+    const dead = picks.map((n, i) => (i !== answer && n === 0 ? i : -1)).filter((i) => i >= 0);
+    if (!dead.length) continue;
+
+    const notes = parseDistractorNotes(r.distractor_notes);
+    const dead_notes: Record<string, string> = {};
+    for (const i of dead) if (notes[String(i)]) dead_notes[String(i)] = notes[String(i)];
+
+    out.push({
+      question_id: r.question_id,
+      no: r.no,
+      category: r.category,
+      sub_category: r.sub_category,
+      prompt: r.prompt,
+      choices,
+      answer,
+      asked: r.asked,
+      picks,
+      dead,
+      dead_notes,
+    });
+  }
+
+  // 死んだ誤答が多い順。同数なら出題回数が多い＝確度が高いほうを先に
+  out.sort((a, b) => b.dead.length - a.dead.length || b.asked - a.asked || a.no - b.no);
+  return out.slice(0, limit);
+}
+
 export async function getGrammarStudentDetail(
   db: D1Database,
   friendId: string,
