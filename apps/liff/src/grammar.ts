@@ -173,6 +173,15 @@ interface LogEntry extends Question {
 
 type Kind = 'normal' | 'review' | 'retry' | 'checkup' | 'mixed';
 
+/**
+ * 選択肢を並べ替えない単元。
+ *
+ * SV/SVC/SVO/SVOO/SVOC や S/V/O/C/M は決まった順で並ぶこと自体が読みやすさで、
+ * 混ぜると毎問おなじ選択肢を探し直すことになる。**問題データ側で並びを決めている**
+ * ので、ここでは触らない（当てずっぽう対策は、正解の位置が問題ごとに変わることで足りる）。
+ */
+const FIXED_ORDER_CATS = new Set(['① 場所']);
+
 // ── 状態 ────────────────────────────────────────────────────────────────────
 
 /** 1回のテストで出せる上限。サーバーの MAX_QUESTIONS_PER_REQUEST と揃えること。 */
@@ -188,6 +197,15 @@ const MIXED_TIMER = 20;
 
 const cfg = {
   bookId: 0,
+  /**
+   * URL で問題集を固定したときのスラッグ。
+   *
+   * 入り口を分けるための仕組み。リッチメニューから
+   * `?page=grammar&book=grammar-course` のように渡すと、その1冊だけを開き、
+   * 選択画面も「切り替える」も出さない。**別のテストとして見えることが目的**なので、
+   * 中で切り替えられると分けた意味がなくなる。
+   */
+  pinnedSlug: null as string | null,
   category: null as string | null,
   subCategory: null as string | null,
   lim: 10,
@@ -298,7 +316,10 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 function renderPrompt(raw: string): string {
   return esc(raw)
     .replace(/\(\s*\)/g, '<span class="g-blank"></span>')
-    .replace(/\[([^\]]+)\]/g, '<span class="g-uline">$1</span>');
+    .replace(/\[([^\]]+)\]/g, '<span class="g-uline">$1</span>')
+    // 英文と設問文を分けるための改行。HTML は書かせない（esc で潰れる）ので
+    // 問題データ側は素の改行で持ち、ここで <br> にする
+    .replace(/\n/g, '<br>');
 }
 
 // ── スタイル ────────────────────────────────────────────────────────────────
@@ -541,6 +562,9 @@ function checkupCard(b: DashboardBook): string {
  * 何のためのリンクか分からない。「いま何を使っているか」を見せる行にする。
  */
 function bookRow(name: string): string {
+  // 固定されているときは行ごと出さない。切り替え先が無いのに
+  // 「いま使っている問題集」とだけ書いてあると、切り替えられると誤解させる。
+  if (cfg.pinnedSlug) return '';
   return `
 <div class="v-book">
   <div class="t">
@@ -675,6 +699,32 @@ async function showHome(): Promise<void> {
   if (!state.books.length) {
     app().innerHTML = shell('', '', '<p class="v-empty">問題集がまだ登録されていません。</p>');
     return;
+  }
+
+  // URL で固定されているなら、選択画面を通さずその1冊に合わせる。
+  // サーバーは生徒ごとに「選択中の問題集」を持っているので、ずれていれば直す。
+  if (cfg.pinnedSlug) {
+    const pinned = state.books.find((b) => b.slug === cfg.pinnedSlug);
+    if (!pinned) {
+      app().innerHTML = shell('', '', '<p class="v-empty">この問題集は見つかりません。</p>');
+      return;
+    }
+    if (d.selected_book_id !== pinned.id) {
+      try {
+        await api('/api/grammar/book', {
+          method: 'PUT',
+          body: JSON.stringify({ book_id: pinned.id }),
+        });
+      } catch (e) {
+        renderError(e instanceof Error ? e.message : '問題集の切り替えに失敗しました');
+        return;
+      }
+      cfg.bookId = pinned.id;
+      cfg.category = null;
+      state.dashboard = null;
+      await showHome();
+      return;
+    }
   }
 
   // 未選択なら選択画面から。選択済みならその1冊だけを見せる。
@@ -1107,7 +1157,14 @@ function renderQuestion(): void {
 
   // 選択肢は毎回シャッフルする。並びを覚えて「いつも3番」で当てられると測れない。
   // 中身は**シャッフル前の添字**。これをそのままサーバーに送る。
-  state.order = shuffle(q.choices.map((_, i) => i));
+  //
+  // ただし**尺度になっている選択肢は並べ替えない。** SV/SVC/SVO/SVOO/SVOC や
+  // S/O/C/M は決まった順で並んでいること自体が読みやすさなので、混ぜると
+  // 毎問おなじ4語を探し直すことになる。この型は全問で選択肢が共通なので、
+  // 並びを覚えても正解位置は問題ごとに変わり、当てずっぽうの助けにはならない。
+  state.order = FIXED_ORDER_CATS.has(q.sub_category ?? '')
+    ? q.choices.map((_, i) => i)
+    : shuffle(q.choices.map((_, i) => i));
 
   // 総合演習は解説を出さず自動で次へ進むので、解説と「次へ」の枠自体を置かない。
   const quiet = state.kind === 'mixed';
@@ -1623,7 +1680,8 @@ document.addEventListener('keydown', (e) => {
 
 // ── 入口 ────────────────────────────────────────────────────────────────────
 
-export async function initGrammar(): Promise<void> {
+export async function initGrammar(bookSlug?: string | null): Promise<void> {
   injectStyles();
+  cfg.pinnedSlug = bookSlug || null;
   await showHome();
 }

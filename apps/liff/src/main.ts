@@ -416,7 +416,9 @@ async function main() {
     } else if (page === 'vocab') {
       await initVocab();
     } else if (page === 'grammar') {
-      await initGrammar();
+      // `?book=<slug>` を付けると、その問題集だけを開く（選択画面を出さない）。
+      // 文法テストと文法講座テストを、リッチメニューの別々の入り口として並べるため。
+      await initGrammar(_snapshotParam('book'));
     } else if (page === 'materials') {
       await initMaterials();
     } else if (page === 'submit') {

@@ -32,6 +32,47 @@ function slugify(name: string): string {
   return s
 }
 
+/**
+ * 問題文の描画。生徒側（LIFF）と同じ記法で見せる。
+ *   改行 … 英文と設問文の区切り
+ *   [ ]  … 下線。設問が指している箇所
+ * 管理画面で素の文字列のまま出すと、生徒が見ている形と違って見えて判断を誤る。
+ */
+function Prompt({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((line, li) => (
+        <p key={li} className={li === 0 ? 'text-sm text-gray-800' : 'mt-1 text-xs text-gray-500'}>
+          {line.split(/(\[[^\]]+\])/).map((part, i) =>
+            part.startsWith('[') && part.endsWith(']') ? (
+              <u key={i} className="decoration-amber-400 decoration-2 underline-offset-2">
+                {part.slice(1, -1)}
+              </u>
+            ) : (
+              <span key={i}>{part}</span>
+            ),
+          )}
+        </p>
+      ))}
+    </>
+  )
+}
+
+/** 段階（sub_category）→ 設問文 の2段でまとめる。設問文は問題文の最終行。 */
+function groupQuestions(questions: GrammarQuestionRow[]) {
+  const stages = new Map<string, Map<string, GrammarQuestionRow[]>>()
+  for (const q of questions) {
+    const stage = q.sub_category || '（未分類）'
+    const lines = q.prompt.split('\n')
+    const ask = lines.length > 1 ? lines[lines.length - 1] : '（設問文なし）'
+    if (!stages.has(stage)) stages.set(stage, new Map())
+    const g = stages.get(stage)!
+    if (!g.has(ask)) g.set(ask, [])
+    g.get(ask)!.push(q)
+  }
+  return stages
+}
+
 export default function GrammarBooksPanel() {
   const { selectedAccount } = useAccount()
   const [books, setBooks] = useState<GrammarBookSummary[]>([])
@@ -207,62 +248,75 @@ export default function GrammarBooksPanel() {
                   ) : questions.length === 0 ? (
                     <p className="py-4 text-center text-sm text-gray-500">問題がありません。</p>
                   ) : (
-                    <ul className="max-h-[520px] space-y-3 overflow-auto">
-                      {questions.map((q) => (
-                        <li key={q.id} className="rounded border border-gray-100 bg-gray-50 p-3">
-                          <div className="flex flex-wrap items-baseline gap-2">
-                            <span className="tabular-nums text-xs text-gray-400">
-                              {String(q.no).padStart(3, '0')}
+                    <div className="max-h-[520px] space-y-4 overflow-auto">
+                      {[...groupQuestions(questions)].map(([stage, groups]) => (
+                        <section key={stage}>
+                          <h4 className="sticky top-0 bg-white py-1 text-sm font-semibold text-gray-700">
+                            {stage}
+                            <span className="ml-2 text-xs font-normal text-gray-400">
+                              {[...groups.values()].reduce((a, v) => a + v.length, 0)} 問
                             </span>
-                            <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500">
-                              {q.category}
-                            </span>
-                            {q.sub_category && (
-                              <span className="text-xs text-gray-400">{q.sub_category}</span>
-                            )}
-                            {q.level && (
-                              <span className="text-xs text-gray-400">Lv.{q.level}</span>
-                            )}
-                          </div>
-                          <p className="mt-1.5 text-sm text-gray-800">{q.prompt}</p>
-                          <div className="mt-1.5 space-y-0.5 text-xs">
-                            {q.choices.map((c, i) => {
-                              const why = q.distractors?.[String(i)]
-                              return (
-                                <div key={i} className="flex flex-wrap items-baseline gap-2">
-                                  <span
-                                    className={
-                                      i === q.answer
-                                        ? 'font-semibold text-emerald-700'
-                                        : 'text-gray-500'
-                                    }
-                                  >
-                                    {i + 1}. {c}
-                                    {i === q.answer && ' ◯'}
-                                  </span>
-                                  {/* 誤答がどの勘違いに対応するか。空なら誰も選ばない可能性が高い */}
-                                  {i !== q.answer &&
-                                    (why ? (
-                                      <span className="text-gray-400">← {why}</span>
+                          </h4>
+                          {[...groups].map(([ask, items]) => (
+                            <div key={ask} className="mt-2">
+                              <div className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
+                                {ask}
+                                <span className="ml-2 text-gray-400">{items.length} 問</span>
+                              </div>
+                              <ul className="mt-1 space-y-2">
+                                {items.map((q) => (
+                                  <li key={q.id} className="rounded border border-gray-100 bg-gray-50 p-3">
+                                    <div className="flex flex-wrap items-baseline gap-2">
+                                      <span className="tabular-nums text-xs text-gray-400">
+                                        {String(q.no).padStart(3, '0')}
+                                      </span>
+                                      {q.level && <span className="text-xs text-gray-400">Lv.{q.level}</span>}
+                                    </div>
+                                    <div className="mt-1.5">
+                                      <Prompt text={q.prompt} />
+                                    </div>
+                                    <div className="mt-1.5 space-y-0.5 text-xs">
+                                      {q.choices.map((c, i) => {
+                                        const why = q.distractors?.[String(i)]
+                                        return (
+                                          <div key={i} className="flex flex-wrap items-baseline gap-2">
+                                            <span
+                                              className={
+                                                i === q.answer
+                                                  ? 'font-semibold text-emerald-700'
+                                                  : 'text-gray-500'
+                                              }
+                                            >
+                                              {i + 1}. {c}
+                                              {i === q.answer && ' ◯'}
+                                            </span>
+                                            {i !== q.answer &&
+                                              (why ? (
+                                                <span className="text-gray-400">← {why}</span>
+                                              ) : (
+                                                <span className="text-amber-600">← 勘違いラベルなし</span>
+                                              ))}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                    {q.explanation ? (
+                                      <p className="mt-2 text-xs leading-relaxed text-gray-600">
+                                        {q.explanation}
+                                      </p>
                                     ) : (
-                                      <span className="text-amber-600">← 勘違いラベルなし</span>
-                                    ))}
-                                </div>
-                              )
-                            })}
-                          </div>
-                          {q.explanation ? (
-                            <p className="mt-2 text-xs leading-relaxed text-gray-600">
-                              {q.explanation}
-                            </p>
-                          ) : (
-                            <p className="mt-2 text-xs text-amber-700">
-                              解説がありません。文法テストは解説が本体なので、入れることを勧めます。
-                            </p>
-                          )}
-                        </li>
+                                      <p className="mt-2 text-xs text-amber-700">
+                                        解説がありません。文法テストは解説が本体なので、入れることを勧めます。
+                                      </p>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </section>
                       ))}
-                    </ul>
+                    </div>
                   )}
                 </div>
               )}

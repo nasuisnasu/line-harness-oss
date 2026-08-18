@@ -1,3 +1,1 @@
-build: 2026-08-15l
-host: readash-liff.pages.dev (Cloudflare Pages)
-grammar/vocab: カウントダウンの目標日を生徒が設定できるように（両テスト共通）
+2026-08-18 11:12 grammar: stages
