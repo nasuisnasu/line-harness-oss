@@ -1298,11 +1298,23 @@ export interface GrammarStudentRow {
  * 生徒一覧。**未実施の生徒も末尾に出す。**
  * 誰が手をつけていないかが分かることのほうが、実施済みの並びより大事。
  */
+/**
+ * 管理画面の生徒一覧。
+ *
+ * `bookIds` を渡すと**その問題集群だけ**で集計する。
+ * 単語・熟語・4択・講座は生徒から見て別のテストなので、
+ * 管理画面も分ける（リッチメニューの区切りに合わせる）。
+ * 渡さないと、生徒が最後に解いた1冊が出てしまい、
+ * 「熟語を解いた生徒が4択の画面に熟語の数字で並ぶ」ことになる。
+ */
 export async function getGrammarStudents(
   db: D1Database,
   lineAccountId?: string | null,
   tagId?: string | null,
+  bookIds?: number[] | null,
 ): Promise<GrammarStudentRow[]> {
+  const scope = bookIds && bookIds.length ? bookIds : null;
+  const inScope = scope ? `(${scope.map(() => '?').join(',')})` : '';
   const conds: string[] = [];
   const binds: unknown[] = [];
   if (lineAccountId) {
@@ -1315,6 +1327,11 @@ export async function getGrammarStudents(
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
+  // 対象の問題集に限って結合する。ON 側に条件を置くこと。
+  // WHERE に置くと、その問題集をまだ解いていない生徒が一覧から消える。
+  const join = scope
+    ? `LEFT JOIN grammar_sessions s ON s.friend_id = f.id AND s.book_id IN ${inScope}`
+    : `LEFT JOIN grammar_sessions s ON s.friend_id = f.id`;
   const rows = await db
     .prepare(
       `SELECT f.id AS friend_id, f.display_name,
@@ -1322,12 +1339,12 @@ export async function getGrammarStudents(
               COUNT(DISTINCT s.id) AS sessions,
               COALESCE(SUM(s.total), 0) AS answers
        FROM friends f
-       LEFT JOIN grammar_sessions s ON s.friend_id = f.id
+       ${join}
        ${where}
        GROUP BY f.id
        ORDER BY (last_played_at IS NULL) ASC, last_played_at DESC, f.created_at DESC`,
     )
-    .bind(...binds)
+    .bind(...(scope ?? []), ...binds)
     .all<GrammarStudentRow>();
 
   const out: GrammarStudentRow[] = [];
@@ -1336,21 +1353,26 @@ export async function getGrammarStudents(
       .prepare(
         `SELECT total, correct FROM grammar_sessions
          WHERE friend_id = ? AND kind <> 'retry'
+         ${scope ? `AND book_id IN ${inScope}` : ''}
          ORDER BY finished_at DESC, id DESC LIMIT 1`,
       )
-      .bind(r.friend_id)
+      .bind(r.friend_id, ...(scope ?? []))
       .first<{ total: number; correct: number }>();
 
     // 対象の問題集は、本人が選んだもの → 無ければ直近に解いたもの。
-    const selected = await getSelectedGrammarBookId(db, r.friend_id);
+    // **絞り込みがあるときは、その範囲の中から選ぶ。**
+    const selectedRaw = await getSelectedGrammarBookId(db, r.friend_id);
+    const selected = !scope || (selectedRaw && scope.includes(selectedRaw)) ? selectedRaw : null;
     const played = await db
       .prepare(
         `SELECT book_id FROM grammar_sessions WHERE friend_id = ?
+         ${scope ? `AND book_id IN ${inScope}` : ''}
          ORDER BY finished_at DESC, id DESC LIMIT 1`,
       )
-      .bind(r.friend_id)
+      .bind(r.friend_id, ...(scope ?? []))
       .first<{ book_id: number }>();
-    const focusId = selected ?? played?.book_id ?? null;
+    // 未実施でも「何問中いくつ習得か」を出したいので、範囲の先頭に倒す
+    const focusId = selected ?? played?.book_id ?? (scope ? scope[0] : null);
 
     let bookName: string | null = null;
     let mastery: GrammarMastery = { total: 0, mastered: 0, unmastered: 0, untried: 0, rate: 0 };

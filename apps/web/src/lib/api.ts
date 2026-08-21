@@ -226,8 +226,9 @@ export const api = {
    * `{ lineAccountId: selectedAccount.id }` を渡すこと。渡さないと複数OAの生徒が混ざる。
    */
   grammar: {
-    students: (params: { lineAccountId?: string; tagId?: string }) => {
+    students: (params: { lineAccountId?: string; tagId?: string; bookIds?: number[] }) => {
       const q = new URLSearchParams()
+      if (params.bookIds?.length) q.set('book_ids', params.bookIds.join(','))
       if (params.lineAccountId) q.set('lineAccountId', params.lineAccountId)
       if (params.tagId) q.set('tagId', params.tagId)
       return fetchApi<{ success: boolean; students: GrammarStudentRow[] }>(

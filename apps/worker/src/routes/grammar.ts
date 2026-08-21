@@ -316,7 +316,13 @@ grammar.get('/api/grammar/admin/students', async (c) => {
   // 既定で受講生タグに絞る。文法テストを開けるのはタグ持ちだけなので、
   // 一覧に保護者やタグ無しの友だちが混ざると「未実施」の数が意味を失う。
   const tagId = c.req.query('tagId') || c.env.VOCAB_ALLOW_TAG_ID || null;
-  const students = await getGrammarStudents(c.env.DB, lineAccountId, tagId);
+  // book_ids=3,4,5 でその問題集群だけに絞る。
+  // 単語・熟語・4択・講座は別のテストなので、管理画面も分けて見る。
+  const bookIds = (c.req.query('book_ids') || '')
+    .split(',')
+    .map((x) => Number(x.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const students = await getGrammarStudents(c.env.DB, lineAccountId, tagId, bookIds);
   return c.json({ success: true, students });
 });
 

@@ -73,7 +73,12 @@ function groupQuestions(questions: GrammarQuestionRow[]) {
   return stages
 }
 
-export default function GrammarBooksPanel() {
+export default function GrammarBooksPanel({
+  /** この画面で扱う問題集だけに絞る。渡さなければ全部 */
+  match,
+}: {
+  match?: (slug: string) => boolean
+} = {}) {
   const { selectedAccount } = useAccount()
   const [books, setBooks] = useState<GrammarBookSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -104,13 +109,14 @@ export default function GrammarBooksPanel() {
     setError('')
     try {
       const res = await api.grammar.books(selectedAccount?.id)
-      setBooks(res.books ?? [])
+      const all = res.books ?? []
+      setBooks(match ? all.filter((b) => match(b.slug)) : all)
     } catch {
       setError('読み込みに失敗しました')
     } finally {
       setLoading(false)
     }
-  }, [selectedAccount])
+  }, [selectedAccount, match])
 
   useEffect(() => {
     load()

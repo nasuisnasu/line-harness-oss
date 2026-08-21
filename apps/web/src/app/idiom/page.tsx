@@ -1,15 +1,15 @@
 'use client'
 
 /**
- * 4択テスト の管理画面。
+ * 熟語テスト の管理画面。
  *
  * 中身は `components/tests/test-admin.tsx` と共有。
  * ここは**どの問題集を対象にするか**だけを決める。
- * 受験英語の文法問題を21分野140単元に分けた4択。講座とは独立。
+ * ターゲット1000・速読英熟語・パス単。意味／熟語／例文の穴埋めの3方向。
  */
 
 import TestAdmin from '@/components/tests/test-admin'
 
 export default function Page() {
-  return <TestAdmin title="4択テスト" match={(s) => s === 'juken-grammar'} />
+  return <TestAdmin title="熟語テスト" match={(s) => s.startsWith('idiom-')} />
 }
