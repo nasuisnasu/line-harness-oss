@@ -206,6 +206,14 @@ const cfg = {
    * 中で切り替えられると分けた意味がなくなる。
    */
   pinnedSlug: null as string | null,
+  /**
+   * 教材のグループ。slug の接頭辞で絞る（`idiom` なら idiom-* の3冊だけ）。
+   *
+   * 熟語テストのように**同じ仕組みで中身だけ違う教材が複数ある**とき、
+   * ツールを開いてから本を選ばせるため。単語テストと同じ形。
+   * 選んだ本はグループごとに覚えるので、毎回選び直さなくてよい。
+   */
+  group: null as string | null,
   category: null as string | null,
   subCategory: null as string | null,
   lim: 10,
@@ -246,6 +254,23 @@ const state = {
 };
 
 // ── 小物 ────────────────────────────────────────────────────────────────────
+
+/** グループに属する問題集だけを返す。グループ指定が無ければ全部。 */
+function booksInGroup(books: Book[]): Book[] {
+  if (!cfg.group) return books;
+  return books.filter((b) => b.slug.startsWith(`${cfg.group}-`));
+}
+
+/** グループごとに「最後に選んだ問題集」を覚える。ツールを行き来しても選び直さずに済む。 */
+function rememberedBook(): number | null {
+  if (!cfg.group) return null;
+  const v = localStorage.getItem(`grammarBook:${cfg.group}`);
+  return v ? Number(v) : null;
+}
+
+function rememberBook(id: number): void {
+  if (cfg.group) localStorage.setItem(`grammarBook:${cfg.group}`, String(id));
+}
 
 function app(): HTMLElement {
   return document.getElementById('app')!;
@@ -412,10 +437,20 @@ function navBar(active: Tab): string {
 </nav>`;
 }
 
+/**
+ * 画面の名前。同じ仕組みを別の教材でも使うので、グループごとに変える。
+ * ここが「文法テスト」のままだと、熟語を開いても文法テストと書かれてしまう。
+ */
+function toolName(): string {
+  if (cfg.group === 'idiom') return '熟語テスト';
+  if (cfg.pinnedSlug === 'grammar-course') return '文法講座テスト';
+  return '文法テスト';
+}
+
 function shell(title: string, sub: string, body: string, count = '', tab: Tab = 'home'): string {
   return `
 <div class="v-top">
-  <span class="ttl">文法テスト</span>
+  <span class="ttl">${esc(toolName())}</span>
   <span class="rng">${esc(sub)}</span>
   ${count ? `<span class="cnt">${esc(count)}</span>` : ''}
 </div>
@@ -565,6 +600,8 @@ function bookRow(name: string): string {
   // 固定されているときは行ごと出さない。切り替え先が無いのに
   // 「いま使っている問題集」とだけ書いてあると、切り替えられると誤解させる。
   if (cfg.pinnedSlug) return '';
+  // グループ内に1冊しかないなら切り替え先が無い
+  if (cfg.group && booksInGroup(state.books).length < 2) return '';
   return `
 <div class="v-book">
   <div class="t">
@@ -639,7 +676,7 @@ function renderGoalSetup(): void {
 function renderBookPicker(canCancel: boolean): void {
   const body = `
 <p class="v-sub">使っている問題集を選んでください。あとから切り替えられます。</p>
-${state.books
+${booksInGroup(state.books)
   .map(
     (b) =>
       `<button class="v-pick${b.id === cfg.bookId ? ' on' : ''}" data-book="${b.id}">
@@ -662,6 +699,7 @@ ${canCancel ? '<button class="v-ghost" id="gCancel">やめる</button>' : ''}`;
           method: 'PUT',
           body: JSON.stringify({ book_id: bookId }),
         });
+        rememberBook(bookId);
         cfg.bookId = bookId;
         cfg.category = null;
         state.dashboard = null;
@@ -725,6 +763,39 @@ async function showHome(): Promise<void> {
       await showHome();
       return;
     }
+  }
+
+  // グループ指定があるときは、そのグループの中で選ぶ。
+  // サーバーは「選択中の問題集」を1つしか持たないので、別のツールを開くと
+  // ずれる。グループごとの記憶（localStorage）で選び直しを省く。
+  if (cfg.group) {
+    const inGroup = booksInGroup(state.books);
+    if (!inGroup.length) {
+      app().innerHTML = shell('', '', '<p class="v-empty">この種類の問題集がまだありません。</p>');
+      return;
+    }
+    const want = inGroup.some((b) => b.id === d.selected_book_id)
+      ? d.selected_book_id
+      : inGroup.find((b) => b.id === rememberedBook())?.id ?? null;
+    if (!want) {
+      cfg.bookId = 0;
+      renderBookPicker(false);
+      return;
+    }
+    if (d.selected_book_id !== want) {
+      try {
+        await api('/api/grammar/book', { method: 'PUT', body: JSON.stringify({ book_id: want }) });
+      } catch (e) {
+        renderError(e instanceof Error ? e.message : '問題集の切り替えに失敗しました');
+        return;
+      }
+      cfg.bookId = want;
+      cfg.category = null;
+      state.dashboard = null;
+      await showHome();
+      return;
+    }
+    rememberBook(want);
   }
 
   // 未選択なら選択画面から。選択済みならその1冊だけを見せる。
@@ -1680,8 +1751,33 @@ document.addEventListener('keydown', (e) => {
 
 // ── 入口 ────────────────────────────────────────────────────────────────────
 
-export async function initGrammar(bookSlug?: string | null): Promise<void> {
+/**
+ * 文法講座の入り口。講義とテストに分岐させる。
+ *
+ * リッチメニューの1枠から2つの行き先に分けたいので、間に画面を1枚挟む。
+ * 講義は eijakuniki.com（サイト側）、テストはこの LIFF の中。
+ */
+export async function initCourseMenu(): Promise<void> {
+  injectStyles();
+  const body = `
+<p class="v-sub">講義を読んでから、テストで確かめます。</p>
+<button class="v-go" id="cLesson">講義を見る<br><small>全18講・文法講座のトップへ</small></button>
+<button class="v-ghost" id="cTest">テストを始める<br><small>場所と形・1584問</small></button>`;
+  app().innerHTML = shell('文法講座', '', body, '', null);
+  document.getElementById('cLesson')!.onclick = () => {
+    location.href = 'https://eijakuniki.com/grammar/';
+  };
+  document.getElementById('cTest')!.onclick = () => {
+    void initGrammar('grammar-course');
+  };
+}
+
+export async function initGrammar(
+  bookSlug?: string | null,
+  group?: string | null,
+): Promise<void> {
   injectStyles();
   cfg.pinnedSlug = bookSlug || null;
+  cfg.group = group || null;
   await showHome();
 }

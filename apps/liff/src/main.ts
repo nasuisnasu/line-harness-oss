@@ -21,7 +21,7 @@ import { initSendTemplate } from './send-template.js';
 import { initEijaku } from './eijaku.js';
 import { initSchedule } from './schedule.js';
 import { initVocab } from './vocab.js';
-import { initGrammar } from './grammar.js';
+import { initGrammar, initCourseMenu } from './grammar.js';
 import { initMaterials } from './materials.js';
 import { initSubmitMaterial } from './submit-material.js';
 
@@ -415,10 +415,15 @@ async function main() {
       await initEijaku(formId);
     } else if (page === 'vocab') {
       await initVocab();
+    } else if (page === 'course') {
+      // 文法講座は講義とテストに分岐する。リッチメニュー1枠から2つの行き先へ
+      await initCourseMenu();
     } else if (page === 'grammar') {
       // `?book=<slug>` を付けると、その問題集だけを開く（選択画面を出さない）。
       // 文法テストと文法講座テストを、リッチメニューの別々の入り口として並べるため。
-      await initGrammar(_snapshotParam('book'));
+      // `?book=<slug>` は1冊に固定、`?group=<接頭辞>` はその種類の中から選ばせる
+      // （熟語テストは3冊あるので、ツールを開いてから本を選ぶ）
+      await initGrammar(_snapshotParam('book'), _snapshotParam('group'));
     } else if (page === 'materials') {
       await initMaterials();
     } else if (page === 'submit') {

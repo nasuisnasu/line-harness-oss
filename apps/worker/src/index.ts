@@ -70,6 +70,9 @@ export type Env = {
     VOCAB_ALLOW_TAG_ID?: string;       // 受講生タグの tags.id
     // 授業教材の受け取り。eijakuniki.com 側の棚（ワーカー eijaku-ai）を呼ぶ
     SHELF?: Fetcher;                   // 棚へのサービスバインディング（1042回避のためURLでは呼ばない）
+    // 教材の取り込みを回す OA。**受講生専用だけ。**未設定なら VOCAB_LINE_ACCOUNT_ID を見る。
+    // どちらも無いときは取り込まない（fail closed）
+    STUDENT_LINE_ACCOUNT_ID?: string;
     SHELF_PUBLIC_URL?: string;         // 生徒に見せるファイルの公開URL（例: https://eijaku-ai.<sub>.workers.dev）
     SHELF_API_KEY?: string;            // 棚と共有する鍵
   };

@@ -57,7 +57,9 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, lineAccessToken, undefined, discordWebhookUrl);
+        // 教材の取り込みは受講生専用OAだけ。この既定ルートは accountId を持たないので回さない
+        await handleEvent(db, lineClient, event, lineAccessToken, undefined, discordWebhookUrl,
+          undefined, c.env.TRACKING_BASE_URL);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -110,7 +112,19 @@ webhook.post('/webhook/:accountId', async (c) => {
 
   const lineClient = new LineClient(account.channel_access_token);
   const discordWebhookUrl = c.env.DISCORD_WEBHOOK_URL;
-  const uploads = c.env.UPLOADS;
+  // handleEvent は Hono の c を持たない。env から要るものだけ渡す
+  const trackingBaseUrl = c.env.TRACKING_BASE_URL;
+
+  // 教材の取り込みを回すのは**受講生専用OAだけ**。
+  // 公開OAには見込み客の雑談写真も飛んでくる。そこまで拾うと、教材の棚に
+  // 教材でないものが溜まり、/kyozai-inbox が毎回それを選り分けることになる。
+  // 受講生のOAが分からないときは回さない（fail closed）。
+  const studentAccountId = c.env.STUDENT_LINE_ACCOUNT_ID || c.env.VOCAB_LINE_ACCOUNT_ID;
+  const intakeOn = !!studentAccountId && accountId === studentAccountId;
+  const uploads = intakeOn ? c.env.UPLOADS : undefined;
+  if (!intakeOn) {
+    console.log(`[material-intake] 受講生専用OAではないので取り込みを回さない accountId=${accountId}`);
+  }
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
@@ -122,6 +136,7 @@ webhook.post('/webhook/:accountId', async (c) => {
           accountId,
           discordWebhookUrl,
           uploads,
+          trackingBaseUrl,
         );
       } catch (err) {
         console.error('Error handling webhook event for account', accountId, err);
@@ -142,6 +157,8 @@ async function handleEvent(
   discordWebhookUrl?: string,
   /** 教材素材の保存先。未設定の環境（テスト等）では取り込みを黙って飛ばす。 */
   uploads?: R2Bucket,
+  /** クリック計測のリンク書き換え先。未設定なら書き換えない。 */
+  trackingBaseUrl?: string,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -233,8 +250,8 @@ async function handleEvent(
           if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
             try {
               let content = applyVars(firstStep.message_content, { name: profile?.displayName ?? '', friendId: friend.id });
-              if (c.env.TRACKING_BASE_URL) {
-                content = applyTrackingLinks(content, c.env.TRACKING_BASE_URL, friend.id);
+              if (trackingBaseUrl) {
+                content = applyTrackingLinks(content, trackingBaseUrl, friend.id);
               }
               const message = buildMessage(firstStep.message_type, content);
               await lineClient.pushMessage(userId, [message]);
@@ -504,7 +521,8 @@ async function handleEvent(
       await addTagToFriend(db, friend.id, tagId);
 
       // tag_added シナリオを発火
-      await enrollTagScenarios(db, friend.id, tagId, userId, lineAccessToken);
+      await enrollTagScenarios(db, friend.id, tagId, userId, lineAccessToken,
+        discordWebhookUrl, trackingBaseUrl);
 
       // イベントバス発火: tag_added
       await fireEvent(db, 'tag_added', {
@@ -558,6 +576,8 @@ async function enrollTagScenarios(
   tagId: string,
   lineUserId: string,
   lineAccessToken: string,
+  discordWebhookUrl?: string,
+  trackingBaseUrl?: string,
 ): Promise<void> {
   const scenarios = await getScenarios(db);
   const lineClient = new LineClient(lineAccessToken);
@@ -582,8 +602,8 @@ async function enrollTagScenarios(
       if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
         try {
           let immediateContent = firstStep.message_content;
-          if (c.env.TRACKING_BASE_URL) {
-            immediateContent = applyTrackingLinks(immediateContent, c.env.TRACKING_BASE_URL, friendId);
+          if (trackingBaseUrl) {
+            immediateContent = applyTrackingLinks(immediateContent, trackingBaseUrl, friendId);
           }
           const message = buildMessage(firstStep.message_type, immediateContent);
           await lineClient.pushMessage(lineUserId, [message]);

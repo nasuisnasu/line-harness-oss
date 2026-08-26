@@ -73,8 +73,22 @@ export function resolveUploadType(
   return null;
 }
 
-/** 1ファイルの上限。長文1本の写真・PDF・docx ならこれで足りる。 */
-const MAX_BYTES = 20 * 1024 * 1024;
+/**
+ * 1ファイルの上限。
+ *
+ * 20MB だったころ、あみさんが iPad で手書きした精読ワーク（27ページ・**75MB**）が
+ * ここで落ちた。本人は「送れた」と思っていて、こちらには何も残らなかった（2026-08-22）。
+ * 手書きのPDFは1ページ数MBになるので、20MB では足りない。
+ *
+ * 大きいものは arrayBuffer に載せると Worker のメモリを踏むので、
+ * content-length が分かるときは R2 へ**素通し**する（下の ingest 参照）。
+ */
+const MAX_BYTES = 100 * 1024 * 1024;
+
+/** 素通しにできないとき（長さが分からないとき）だけ使う、メモリに載せる上限。 */
+const MAX_BUFFERED_BYTES = 20 * 1024 * 1024;
+
+const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)}MB`;
 
 /**
  * まとめる時間の窓（分）。
@@ -104,6 +118,28 @@ interface IngestArgs {
 export async function ingestTalkAttachment(args: IngestArgs): Promise<void> {
   const { db, uploads, accessToken, friend, messageId, fileName, discordWebhookUrl } = args;
 
+  const who = friend.display_name ?? '（名前未設定）';
+  /**
+   * 取り込めなかったことを必ず鳴らす。
+   *
+   * 以前はここを console.log で黙って見送っていた。生徒は送ったつもり、
+   * こちらは届いたことすら知らない、という状態が実際に起きた（75MBのPDF）。
+   * **落としたことは、落とした側が言う。**生徒には何も送らない（オーナーが手で拾う）。
+   */
+  const dropped = async (why: string, extra?: string) => {
+    console.log(`[material-intake] 見送り messageId=${messageId} ${why} ${extra ?? ''}`);
+    await notifyDiscord(
+      discordWebhookUrl,
+      [
+        `⚠️ **提出を取り込めませんでした**`,
+        `👤 ${who}`,
+        `📄 ${fileName ?? '（ファイル名なし）'}`,
+        `理由: ${why}${extra ? `（${extra}）` : ''}`,
+        `本人は送ったつもりです。LINEのトークから手で拾ってください`,
+      ].join('\n'),
+    );
+  };
+
   try {
     // 実体は api-data.line.me にある。api.line.me だと 404 になる。
     const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
@@ -111,20 +147,41 @@ export async function ingestTalkAttachment(args: IngestArgs): Promise<void> {
     });
     if (!res.ok) {
       console.error(`[material-intake] コンテンツ取得に失敗 messageId=${messageId} status=${res.status}`);
+      await dropped('LINEから中身を取れなかった', `status=${res.status}`);
       return;
     }
 
     const type = resolveUploadType(fileName, res.headers.get('content-type') ?? undefined);
     if (!type) {
-      // 教材にならない形（zip など）。黙って見送る。生徒には何も言わない。
-      console.log(`[material-intake] 対象外の形式なので見送り messageId=${messageId}`);
+      // 教材にならない形（zip など）
+      await dropped('受け取れない形式', res.headers.get('content-type') ?? 'content-type なし');
       return;
     }
 
-    const buffer = await res.arrayBuffer();
-    if (buffer.byteLength > MAX_BYTES) {
-      console.log(`[material-intake] 大きすぎるので見送り messageId=${messageId} size=${buffer.byteLength}`);
-      return;
+    // 長さが分かるものは R2 へ素通しする。arrayBuffer に載せると
+    // 大きいPDFで Worker のメモリを踏む。
+    const declared = Number(res.headers.get('content-length') || 0);
+    let body: ArrayBuffer | ReadableStream;
+    let size: number;
+    if (declared > 0) {
+      if (declared > MAX_BYTES) {
+        await dropped('大きすぎる', `${mb(declared)} / 上限 ${mb(MAX_BYTES)}`);
+        return;
+      }
+      if (!res.body) {
+        await dropped('中身が空だった');
+        return;
+      }
+      body = res.body;
+      size = declared;
+    } else {
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > MAX_BUFFERED_BYTES) {
+        await dropped('大きすぎる', `${mb(buffer.byteLength)} / 長さ不明のときの上限 ${mb(MAX_BUFFERED_BYTES)}`);
+        return;
+      }
+      body = buffer;
+      size = buffer.byteLength;
     }
 
     // 直前の提出に相乗りできるか見る。
@@ -141,7 +198,7 @@ export async function ingestTalkAttachment(args: IngestArgs): Promise<void> {
       .bind(friend.id, jstWindowStart)
       .first<{ id: string; file_count: number }>();
 
-    const studentName = friend.display_name ?? '（名前未設定）';
+    const studentName = who;
 
     let submissionId: string;
     let isNew = false;
@@ -166,7 +223,7 @@ export async function ingestTalkAttachment(args: IngestArgs): Promise<void> {
     // 同じ番号が2回払い出され、同じキーに上書きして1枚消える（実際に消した）。
     // messageId は LINE 側で一意なので、競合しても衝突しない。
     const key = `submissions/${submissionId}/${messageId}.${type.ext}`;
-    await uploads.put(key, buffer, { httpMetadata: { contentType: type.contentType } });
+    await uploads.put(key, body, { httpMetadata: { contentType: type.contentType } });
 
     // seq も JS 側で決めない。SQL の中で MAX+1 を取れば、読んでから書くまでの
     // すき間が無くなる。表示順の目安にしかならない値だが、欠番や重複があると
@@ -187,7 +244,7 @@ export async function ingestTalkAttachment(args: IngestArgs): Promise<void> {
         key,
         fileName ?? null,
         type.contentType,
-        buffer.byteLength,
+        size,
       )
       .run();
 
@@ -205,5 +262,6 @@ export async function ingestTalkAttachment(args: IngestArgs): Promise<void> {
     }
   } catch (err) {
     console.error('[material-intake] 取り込みに失敗:', err);
+    await dropped('取り込みの途中で失敗した', String(err).slice(0, 200));
   }
 }

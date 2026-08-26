@@ -164,6 +164,49 @@ eijakuMaterials.get('/api/eijaku/students', async (c) => {
 });
 
 /**
+ * Zoomの録画が上がったら、指導1回ぶんを friend_lesson_records に積む。
+ *
+ * 呼ぶのは棚のワーカー（eijaku-ai）だけ。認証は /api/eijaku/students と同じ共有鍵。
+ * 同じ生徒・同じ日の「実施」が既にあれば積まない（webhookの再送や手入力との二重計上を防ぐ）。
+ */
+eijakuMaterials.post('/api/eijaku/lesson-record', async (c) => {
+  const shared = c.env.SHELF_API_KEY;
+  if (!shared) return c.json({ success: false, error: 'サーバーの設定が完了していません' }, 503);
+  if (c.req.header('X-Shelf-Key') !== shared) {
+    return c.json({ success: false, error: 'Unauthorized' }, 401);
+  }
+
+  const body = await c.req.json<{ lineUserId?: string; recordDate?: string; note?: string }>().catch(() => ({} as any));
+  const lineUserId = String(body.lineUserId || '').trim();
+  if (!lineUserId) return c.json({ success: false, error: 'lineUserId required' }, 400);
+
+  const friend = await getFriendByLineUserId(c.env.DB, lineUserId, c.env.VOCAB_LINE_ACCOUNT_ID || undefined);
+  if (!friend) return c.json({ success: false, error: 'friend not found' }, 404);
+
+  const recordDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.recordDate || ''))
+    ? String(body.recordDate)
+    : new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const dup = await c.env.DB
+    .prepare(`SELECT id FROM friend_lesson_records WHERE friend_id = ? AND type = 'lesson' AND record_date = ?`)
+    .bind(friend.id, recordDate)
+    .first<{ id: string }>();
+  if (dup) return c.json({ success: true, data: { recorded: false, reason: 'already recorded', id: dup.id } });
+
+  const id = crypto.randomUUID();
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '');
+  await c.env.DB
+    .prepare(
+      `INSERT INTO friend_lesson_records (id, friend_id, type, count, record_date, note, created_at, updated_at)
+       VALUES (?, ?, 'lesson', 1, ?, ?, ?, ?)`,
+    )
+    .bind(id, friend.id, recordDate, String(body.note || 'Zoom録画から自動記録').slice(0, 200), now, now)
+    .run();
+
+  return c.json({ success: true, data: { recorded: true, id, friendId: friend.id } });
+});
+
+/**
  * 管理ダッシュボード用。Googleカレンダーの直近の予定を返す。
  *
  * 呼ぶのは棚のワーカー（eijaku-ai）だけ。認証は /api/eijaku/students と同じ共有鍵。
