@@ -22,6 +22,7 @@ import { initEijaku } from './eijaku.js';
 import { initSchedule } from './schedule.js';
 import { initVocab } from './vocab.js';
 import { initGrammar, initCourseMenu } from './grammar.js';
+import { initBas } from './bas.js';
 import { initMaterials } from './materials.js';
 import { initSubmitMaterial } from './submit-material.js';
 
@@ -424,6 +425,9 @@ async function main() {
       // `?book=<slug>` は1冊に固定、`?group=<接頭辞>` はその種類の中から選ばせる
       // （熟語テストは3冊あるので、ツールを開いてから本を選ぶ）
       await initGrammar(_snapshotParam('book'), _snapshotParam('group'));
+    } else if (page === 'bas') {
+      // 並び替えテスト（Build a Sentence）。セットは選ばせずプール全体から出す。
+      await initBas();
     } else if (page === 'materials') {
       await initMaterials();
     } else if (page === 'submit') {

@@ -43,6 +43,7 @@ import { businessCalendar } from './routes/business-calendar.js';
 import { pay } from './routes/pay.js';
 import { vocab } from './routes/vocab.js';
 import { grammar } from './routes/grammar.js';
+import { bas } from './routes/bas.js';
 import { lms } from './routes/lms.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
 import { materialSubmissions } from './routes/material-submissions.js';
@@ -68,11 +69,11 @@ export type Env = {
     VOCAB_LOGIN_CHANNEL_ID?: string;   // 受講生専用OAの LINE Login チャネルID
     VOCAB_LINE_ACCOUNT_ID?: string;    // 受講生専用OAの line_accounts.id
     VOCAB_ALLOW_TAG_ID?: string;       // 受講生タグの tags.id
-    // 授業教材の受け取り。eijakuniki.com 側の棚（ワーカー eijaku-ai）を呼ぶ
-    SHELF?: Fetcher;                   // 棚へのサービスバインディング（1042回避のためURLでは呼ばない）
     // 教材の取り込みを回す OA。**受講生専用だけ。**未設定なら VOCAB_LINE_ACCOUNT_ID を見る。
     // どちらも無いときは取り込まない（fail closed）
     STUDENT_LINE_ACCOUNT_ID?: string;
+    // 授業教材の受け取り。eijakuniki.com 側の棚（ワーカー eijaku-ai）を呼ぶ
+    SHELF?: Fetcher;                   // 棚へのサービスバインディング（1042回避のためURLでは呼ばない）
     SHELF_PUBLIC_URL?: string;         // 生徒に見せるファイルの公開URL（例: https://eijaku-ai.<sub>.workers.dev）
     SHELF_API_KEY?: string;            // 棚と共有する鍵
   };
@@ -123,6 +124,7 @@ app.route('/', businessCalendar);
 app.route('/', pay);
 app.route('/', vocab);
 app.route('/', grammar);
+app.route('/', bas);
 app.route('/', lms);
 app.route('/', eijakuMaterials);
 app.route('/', materialSubmissions);
