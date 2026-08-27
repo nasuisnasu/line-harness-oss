@@ -64,6 +64,8 @@ interface Book {
   id: number;
   slug: string;
   name: string;
+  /** 'en' | 'kobun' */
+  subject: string;
   count: number;
   max_no: number;
   sections: BookSection[];
@@ -118,6 +120,14 @@ type Kind = 'normal' | 'review' | 'retry' | 'checkup';
 
 // ── 状態 ────────────────────────────────────────────────────────────────────
 
+/**
+ * ホーム最下部に出す版。
+ *
+ * LINE内ブラウザはHTMLを強くキャッシュするので「直したはずなのに変わらない」が起きる。
+ * この表示を見ればキャッシュか実装かが1往復で切り分く。**中身を変えたら値も上げること。**
+ */
+const BUILD = '2026-08-27a';
+
 /** 範囲は100語ブロック単位でしか選ばせない。キリ番以外を使う場面が無いため。 */
 const BLOCK = 100;
 /** 1回のテストで出せる上限。サーバーの MAX_WORDS_PER_REQUEST と揃えること。 */
@@ -138,6 +148,24 @@ const cfg = {
   /** 実力テストの問題数。多いほど点が安定する（20問は±9ポイント、50問は±6ポイント）。 */
   checkupSize: 20,
 };
+
+/**
+ * いま選んでいる単語帳が古文か。
+ *
+ * 古文には**方向が無い**（古語を見て意味を答える一方向だけ）。
+ * 意味→古語の向きを出すと、語義の文言が他の語とかぶる単語が34%あるせいで
+ * 「すばらしい → ?」に ありがたし・いみじ・めでたし… が7語ぶら下がり、問題が成立しない。
+ * 例文穴埋めも英文の空所を埋める形式なので古文には無い。
+ */
+function isKobun(): boolean {
+  return state.books.find((b) => b.id === cfg.bookId)?.subject === 'kobun';
+}
+
+/** 出題の向きの呼び名。記録画面と設定画面で同じ言い方をする。 */
+function dirName(dir: string): string {
+  if (isKobun()) return '古語→意味';
+  return dir === 'je' ? '日→英' : '英→日';
+}
 
 const state = {
   books: [] as Book[],
@@ -515,6 +543,12 @@ function resetRangeForBook(): void {
   if (cfg.to > max) cfg.to = Math.ceil(max / BLOCK) * BLOCK;
   cfg.to = Math.min(cfg.to, Math.ceil(max / BLOCK) * BLOCK);
   cfg.lim = 20;
+  // 英単語帳から古文に持ち込めない設定を戻す。穴埋めのまま古文を始めると
+  // 例文の無い語ばかりで1問も出ず、日→英のままだと成立しない問題が並ぶ。
+  if (isKobun()) {
+    if (cfg.fmt === 'cloze') cfg.fmt = 'choice';
+    cfg.dir = 'ej';
+  }
 }
 
 // ── ホーム ──────────────────────────────────────────────────────────────────
@@ -593,7 +627,11 @@ async function showHome(): Promise<void> {
        <button class="v-go" id="vStart">セクションテストを受ける</button>` +
       bookRow(book);
 
-  app().innerHTML = shell('', book.name, body);
+  app().innerHTML = shell(
+    '',
+    book.name,
+    body + `<p class="v-note" style="text-align:center;opacity:.5">build ${BUILD}</p>`,
+  );
   bindNav();
 
   const bind = (id: string, fn: () => void) => {
@@ -624,7 +662,8 @@ function blockMax(book: Book): number {
  */
 function setupSummary(): string {
   const fmt = cfg.fmt === 'choice' ? '4択' : cfg.fmt === 'cloze' ? '例文穴埋め' : '意味を答える';
-  const dir = cfg.fmt === 'cloze' ? '' : `・${cfg.dir === 'ej' ? '英→日' : '日→英'}`;
+  // 古文は向きが1つしか無いので、わざわざ名乗らせない
+  const dir = cfg.fmt === 'cloze' || isKobun() ? '' : `・${dirName(cfg.dir)}`;
   return `セクションを選ぶと、その範囲のテストが始まります。${Math.min(cfg.lim, BLOCK)}問・${fmt}${dir}。`;
 }
 
@@ -633,6 +672,7 @@ function renderSetup(): void {
   const dash = state.dashboard?.books.find((b) => b.id === cfg.bookId);
   if (!book) return;
 
+  const kobun = isKobun();
   const nBlocks = blockMax(book);
   let fromBlk = Math.min(Math.max(Math.floor((cfg.from - 1) / BLOCK), 0), nBlocks - 1);
   let toBlk = Math.min(Math.max(Math.ceil(cfg.to / BLOCK) - 1, fromBlk), nBlocks - 1);
@@ -677,11 +717,12 @@ function renderSetup(): void {
     <p class="v-hint" style="margin:16px 0 6px">形式</p>
     <div class="v-row">
       ${chip('fmt', 'choice', '4択', cfg.fmt === 'choice')}
-      ${chip('fmt', 'cloze', '例文穴埋め', cfg.fmt === 'cloze')}
+      ${kobun ? '' : chip('fmt', 'cloze', '例文穴埋め', cfg.fmt === 'cloze')}
       ${chip('fmt', 'recall', '意味を答える', cfg.fmt === 'recall')}
     </div>
-    <!-- 穴埋めは英文の空所に英単語を入れる形式しかないので、方向の選択は出さない -->
-    <div class="v-row${cfg.fmt === 'cloze' ? ' v-hide' : ''}" id="vDirRow" style="margin-top:8px">
+    <!-- 穴埋めは英文の空所に英単語を入れる形式しかないので、方向の選択は出さない。
+         古文はそもそも古語→意味の一方向しか無いので行ごと出さない -->
+    <div class="v-row${cfg.fmt === 'cloze' || kobun ? ' v-hide' : ''}" id="vDirRow" style="margin-top:8px">
       ${chip('dir', 'ej', '英 → 日', cfg.dir === 'ej')}
       ${chip('dir', 'je', '日 → 英', cfg.dir === 'je')}
     </div>
@@ -788,7 +829,7 @@ ${sections || '<p class="v-empty">セクションがありません。</p>'}
         cfg.fmt = b.dataset.v as 'choice' | 'recall' | 'cloze';
         // 押した瞬間に反映する。描き直しを待つと、穴埋めなのに英→日／日→英が
         // 選べる状態がそのまま残る。
-        document.getElementById('vDirRow')?.classList.toggle('v-hide', cfg.fmt === 'cloze');
+        document.getElementById('vDirRow')?.classList.toggle('v-hide', cfg.fmt === 'cloze' || isKobun());
         paintSummary();
       }
       else if (g === 'dir') { cfg.dir = b.dataset.v as 'ej' | 'je'; paintSummary(); }
@@ -1400,7 +1441,7 @@ async function showRecords(): Promise<void> {
 
   const kindLabel = (k: string) => (k === 'review' ? '復習' : k === 'retry' ? 'もう一度' : '通常');
   const fmtLabel = (f: string) => (f === 'recall' ? '自己採点' : '4択');
-  const dirLabel = (d: string) => (d === 'je' ? '日→英' : '英→日');
+  const dirLabel = (d: string) => dirName(d);
 
   const history = rec.sessions.length
     ? `<div class="v-card"><span class="lg">テスト履歴</span>
@@ -1443,8 +1484,8 @@ async function showRecords(): Promise<void> {
            <span class="vl">${pct(v)}</span></div>`;
 
   const formats = `<div class="v-card"><span class="lg">苦手な形式</span>
-      ${fRow('英→日', rec.formats.ej)}
-      ${fRow('日→英', rec.formats.je)}
+      ${fRow(dirName('ej'), rec.formats.ej)}
+      ${fRow(dirName('je'), rec.formats.je)}
       ${fRow('4択', rec.formats.choice)}
       ${fRow('例文穴埋め', rec.formats.cloze)}
       ${fRow('自己採点', rec.formats.recall)}

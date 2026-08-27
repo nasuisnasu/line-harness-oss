@@ -21,6 +21,7 @@ export interface VocabBook {
   line_account_id: string | null;
   slug: string;
   name: string;
+  subject: string;
   sort: number;
   active: number;
   created_at: string;
@@ -69,6 +70,8 @@ export interface BookSummary {
   id: number;
   slug: string;
   name: string;
+  /** 'en' | 'kobun'。方向と形式の出し分けにだけ使う（migration 068） */
+  subject: string;
   count: number;
   max_no: number;
   sections: BookSection[];
@@ -174,6 +177,7 @@ export async function getVocabBooks(
       id: b.id,
       slug: b.slug,
       name: b.name,
+      subject: b.subject ?? 'en',
       count: agg?.count ?? 0,
       max_no: agg?.max_no ?? 0,
       sections: sections.results,
@@ -1271,17 +1275,32 @@ export async function getVocabStudentDetail(
 
 export async function upsertVocabBook(
   db: D1Database,
-  input: { slug: string; name: string; lineAccountId?: string | null; sort?: number },
+  input: {
+    slug: string;
+    name: string;
+    lineAccountId?: string | null;
+    sort?: number;
+    /** 'en' | 'kobun'。省略したら既存の値を残す（入れ直しで古文帳が英語帳に戻らないように） */
+    subject?: string;
+  },
 ): Promise<VocabBook> {
   await db
     .prepare(
-      `INSERT INTO vocab_books (slug, name, line_account_id, sort)
-       VALUES (?,?,?,?)
+      `INSERT INTO vocab_books (slug, name, line_account_id, sort, subject)
+       VALUES (?,?,?,?,?)
        ON CONFLICT(slug) DO UPDATE SET name = excluded.name,
                                        line_account_id = excluded.line_account_id,
-                                       sort = excluded.sort`,
+                                       sort = excluded.sort,
+                                       subject = COALESCE(?, vocab_books.subject)`,
     )
-    .bind(input.slug, input.name, input.lineAccountId ?? null, input.sort ?? 0)
+    .bind(
+      input.slug,
+      input.name,
+      input.lineAccountId ?? null,
+      input.sort ?? 0,
+      input.subject ?? 'en',
+      input.subject ?? null,
+    )
     .run();
   return (await db
     .prepare(`SELECT * FROM vocab_books WHERE slug = ?`)

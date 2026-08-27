@@ -328,6 +328,8 @@ vocab.post('/api/vocab/admin/books', async (c) => {
     name?: string;
     lineAccountId?: string | null;
     sort?: number;
+    /** 'en' | 'kobun'。古文帳を作るときだけ渡す */
+    subject?: string;
     words?: { no: number; en: string; ja: string; section?: string | null }[];
     tsv?: string;
   }>();
@@ -346,6 +348,7 @@ vocab.post('/api/vocab/admin/books', async (c) => {
     name: body.name,
     lineAccountId: body.lineAccountId ?? null,
     sort: body.sort ?? 0,
+    subject: body.subject,
   });
 
   const count = words.length ? await replaceVocabWords(c.env.DB, book.id, words) : 0;
