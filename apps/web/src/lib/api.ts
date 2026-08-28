@@ -200,20 +200,31 @@ export const api = {
    * 渡さないと複数OAの生徒が混ざる。
    */
   vocab: {
-    students: (params: { lineAccountId?: string; tagId?: string; bookId?: number }) => {
+    students: (params: {
+      lineAccountId?: string
+      tagId?: string
+      bookId?: number
+      subject?: string
+    }) => {
       const q = new URLSearchParams()
       if (params.lineAccountId) q.set('lineAccountId', params.lineAccountId)
       if (params.tagId) q.set('tagId', params.tagId)
       // 単語帳を絞る（古文単語テストの画面）。渡さないと生徒が選んでいる単語帳になる
       if (params.bookId) q.set('book_id', String(params.bookId))
+      // 教科。渡さないと英単語の一覧に古文の実施回数が混ざる
+      if (params.subject) q.set('subject', params.subject)
       return fetchApi<{ success: boolean; students: VocabStudentRow[] }>(
         '/api/vocab/admin/students?' + q.toString()
       )
     },
-    student: (friendId: string, bookId?: number) =>
-      fetchApi<{ success: boolean } & VocabStudentDetail>(
-        '/api/vocab/admin/students/' + friendId + (bookId ? '?book_id=' + bookId : '')
-      ),
+    student: (friendId: string, bookId?: number, subject?: string) => {
+      const q = new URLSearchParams()
+      if (bookId) q.set('book_id', String(bookId))
+      if (subject) q.set('subject', subject)
+      return fetchApi<{ success: boolean } & VocabStudentDetail>(
+        '/api/vocab/admin/students/' + friendId + (q.toString() ? '?' + q.toString() : '')
+      )
+    },
     sessionAnswers: (sessionId: number) =>
       fetchApi<{ success: boolean; answers: VocabAnswerRow[] }>(
         '/api/vocab/admin/sessions/' + sessionId + '/answers'

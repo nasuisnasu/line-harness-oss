@@ -226,13 +226,13 @@ export default function VocabStudentDetailPanel({
     setLoading(true)
     setError('')
     try {
-      setData(await api.vocab.student(friendId, bookId))
+      setData(await api.vocab.student(friendId, bookId, subject))
     } catch {
       setError('読み込みに失敗しました')
     } finally {
       setLoading(false)
     }
-  }, [friendId, bookId])
+  }, [friendId, bookId, subject])
 
   useEffect(() => {
     load()

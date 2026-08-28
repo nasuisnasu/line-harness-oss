@@ -297,16 +297,19 @@ vocab.get('/api/vocab/admin/students', async (c) => {
   // 既定で受講生タグに絞る。単語テストを開けるのはタグ持ちだけなので、
   // 一覧に保護者やタグ無しの友だちが混ざると「未実施」の数が意味を失う。
   const tagId = c.req.query('tagId') || c.env.VOCAB_ALLOW_TAG_ID || null;
-  // book_id を渡すとその単語帳だけで数える（古文単語テストの管理画面）
+  // book_id / subject を渡すとその単語帳（教科）だけで数える。
+  // 渡さないと、英単語テストの一覧に古文の実施回数や最終実施日が混ざる。
   const bookId = Number(c.req.query('book_id')) || null;
-  const students = await getVocabStudents(c.env.DB, lineAccountId, tagId, bookId);
+  const subject = c.req.query('subject') || null;
+  const students = await getVocabStudents(c.env.DB, lineAccountId, tagId, bookId, subject);
   return c.json({ success: true, students });
 });
 
 vocab.get('/api/vocab/admin/students/:friendId', async (c) => {
   const friendId = c.req.param('friendId');
   const bookId = Number(c.req.query('book_id')) || null;
-  const detail = await getVocabStudentDetail(c.env.DB, friendId, bookId);
+  const subject = c.req.query('subject') || null;
+  const detail = await getVocabStudentDetail(c.env.DB, friendId, bookId, subject);
   return c.json({ success: true, ...detail });
 });
 

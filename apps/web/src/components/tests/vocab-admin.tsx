@@ -84,6 +84,7 @@ export default function VocabAdmin({
       // lineAccountId は必ず渡す。渡さないと複数OAの生徒が混ざる。
       const res = await api.vocab.students({
         lineAccountId: selectedAccount.id,
+        subject,
         ...(bookId ? { bookId } : {}),
       })
       setStudents(res.students ?? [])
@@ -92,7 +93,7 @@ export default function VocabAdmin({
     } finally {
       setLoading(false)
     }
-  }, [selectedAccount, bookId])
+  }, [selectedAccount, bookId, subject])
 
   useEffect(() => {
     load()
