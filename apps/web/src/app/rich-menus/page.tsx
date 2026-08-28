@@ -111,6 +111,8 @@ export default function RichMenusPage() {
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // タグ連動バッジにタグ名を出すための対応表。IDだけ出しても誰も読めない。
+  const [tagNames, setTagNames] = useState<Record<string, string>>({})
   const { selectedAccount } = useAccount()
 
   const load = useCallback(async () => {
@@ -129,6 +131,13 @@ export default function RichMenusPage() {
   }, [selectedAccount])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!selectedAccount) return
+    void api.tags.list({ lineAccountId: selectedAccount.id }).then((r) => {
+      if (r.success) setTagNames(Object.fromEntries(r.data.map((t) => [t.id, t.name])))
+    }).catch(() => {})
+  }, [selectedAccount])
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`「${name}」を削除しますか？LINE側からも削除されます。`)) return
@@ -207,6 +216,11 @@ export default function RichMenusPage() {
                     {item.showOnFriendAdd && (
                       <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-700">友達追加時に自動表示</span>
                     )}
+                    {item.autoLinkTagId && (
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                        「{tagNames[item.autoLinkTagId] ?? item.autoLinkTagId}」タグで自動表示
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -273,6 +287,9 @@ function RichMenuForm({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [savedMenuId, setSavedMenuId] = useState<string | null>(editingId)
+  // 公開済みかどうか。公開済みなら保存ボタンは「一時保存」ではない
+  // （タグ連動などの設定は画像を上げ直さなくても保存だけで反映される）。
+  const [published, setPublished] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [events, setEvents] = useState<{ id: string; name: string; slug: string }[]>([])
   const [forms, setForms] = useState<{ id: string; name: string }[]>([])
@@ -309,6 +326,7 @@ function RichMenuForm({
         setAreas(res.data.areas.length > 0 ? res.data.areas : [{ ...emptyArea }])
         setSavedMenuId(res.data.id)
         if (res.data.lineRichmenuId) {
+          setPublished(true)
           setImagePreview(api.richMenus.imageUrl(res.data.id))
         }
       }
@@ -368,6 +386,15 @@ function RichMenuForm({
     } finally {
       setSaving(false)
     }
+  }
+
+  // 公開とは別に「設定だけ保存する」。タグ連動は画像を上げ直さなくても効く。
+  // 保存後に一覧へ戻すのは、一覧のバッジが効いた証拠になるため。
+  const handleSaveOnly = async () => {
+    const id = await handleSaveMenu()
+    if (!id) return
+    alert(published ? '保存しました' : '保存しました（まだLINEには公開されていません）')
+    onSaved()
   }
 
   const handlePublish = async () => {
@@ -457,7 +484,10 @@ function RichMenuForm({
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </select>
-          <p className="text-xs text-gray-500 mt-1">画像を公開していないメニューは連動しません（先に公開してください）。</p>
+          <p className="text-xs text-gray-500 mt-1">
+            画像を公開していないメニューは連動しません（先に公開してください）。
+            公開済みなら「設定を保存」だけで反映されます（画像を上げ直す必要はありません）。
+          </p>
         </div>
 
         <div>
@@ -607,11 +637,11 @@ function RichMenuForm({
 
         <div className="flex gap-2 pt-3 border-t border-gray-200">
           <button
-            onClick={handleSaveMenu}
+            onClick={handleSaveOnly}
             disabled={saving}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
           >
-            {saving ? '保存中...' : '一時保存（公開しない）'}
+            {saving ? '保存中...' : published ? '設定を保存' : '一時保存（公開しない）'}
           </button>
           <button
             onClick={handlePublish}
@@ -623,6 +653,7 @@ function RichMenuForm({
           </button>
           <button onClick={onCancel} disabled={saving} className="ml-auto px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">キャンセル</button>
         </div>
+
       </div>
     </div>
   )
