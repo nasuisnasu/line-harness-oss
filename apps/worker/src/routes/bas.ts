@@ -27,6 +27,10 @@ import {
   saveBasSession,
   getBasSessionAnswers,
   getBasQuestions,
+  getBasStudents,
+  getBasStudentDetail,
+  getBasSetSummaries,
+  setBasSetActive,
   upsertBasSet,
   upsertBasQuestions,
   replaceBasTypes,
@@ -252,8 +256,47 @@ bas.post('/api/bas/admin/types', async (c) => {
   return c.json({ success: true, count: n });
 });
 
+/**
+ * 生徒一覧。
+ *
+ * 既定で**受講生タグに絞る**。並び替えテストを開けるのはタグ持ちだけなので、
+ * 保護者やタグ無しの友だちが混ざると「未実施」の数が意味を失う。
+ */
+bas.get('/api/bas/admin/students', async (c) => {
+  const lineAccountId = c.req.query('lineAccountId') || c.env.VOCAB_LINE_ACCOUNT_ID || null;
+  const tagId = c.req.query('tagId') || c.env.VOCAB_ALLOW_TAG_ID || null;
+  const students = await getBasStudents(c.env.DB, lineAccountId, tagId);
+  return c.json({ success: true, students });
+});
+
+bas.get('/api/bas/admin/students/:friendId', async (c) => {
+  const friendId = c.req.param('friendId');
+  const lineAccountId = c.req.query('lineAccountId') || c.env.VOCAB_LINE_ACCOUNT_ID || null;
+  const detail = await getBasStudentDetail(c.env.DB, friendId, lineAccountId);
+  return c.json({ success: true, ...detail });
+});
+
+bas.get('/api/bas/admin/types', async (c) => {
+  const types = await getBasTypes(c.env.DB);
+  return c.json({ success: true, types });
+});
+
 bas.get('/api/bas/admin/sets', async (c) => {
-  const sets = await getBasSets(c.env.DB, c.req.query('lineAccountId') ?? null);
+  const sets = await getBasSetSummaries(c.env.DB, c.req.query('lineAccountId') ?? null);
+  return c.json({ success: true, sets });
+});
+
+/**
+ * セットの出題を止める／再開する。
+ *
+ * **問題は消さない。** 解答履歴が参照しているので、消すと過去の成績が迷子になる。
+ * 易しすぎたセットを引っ込めるのはこの経路。
+ */
+bas.post('/api/bas/admin/sets/:slug/active', async (c) => {
+  const slug = c.req.param('slug');
+  const body = await c.req.json<{ active?: boolean }>();
+  await setBasSetActive(c.env.DB, slug, body.active !== false);
+  const sets = await getBasSetSummaries(c.env.DB, c.req.query('lineAccountId') ?? null);
   return c.json({ success: true, sets });
 });
 

@@ -917,3 +917,212 @@ export async function getBasSessionAnswers(
     elapsed_ms: r.elapsed_ms,
   }));
 }
+
+// ── 講師用（管理画面） ──────────────────────────────────────────────────────
+
+export interface BasStudentRow {
+  friend_id: string;
+  display_name: string | null;
+  last_played_at: string | null;
+  sessions: number;
+  /** 解いた問題の延べ数（同じ問題を2回解けば2） */
+  answers: number;
+  correct: number;
+  /** 通算の正答率（0〜100）。1問も解いていなければ null */
+  rate: number | null;
+  /** 手をつけた問題の数（重複を除く） */
+  tried: number;
+  /**
+   * いちばん落としている型。声をかける入口になるので一覧に出す。
+   * 解答数が足りない型は出さない（当てにならない数字で判断させない）。
+   */
+  weakest: { code: string; name: string; rate: number; tried: number } | null;
+}
+
+/**
+ * 管理画面の生徒一覧。
+ *
+ * **未実施の生徒も出す。** 誰が手をつけていないかが分かることのほうが、
+ * 実施済みの並びより大事。
+ *
+ * 既定で受講生タグに絞る。並び替えテストを開けるのはタグ持ちだけなので、
+ * 一覧に保護者やタグ無しの友だちが混ざると「未実施」の数が意味を失う。
+ */
+export async function getBasStudents(
+  db: D1Database,
+  lineAccountId?: string | null,
+  tagId?: string | null,
+): Promise<BasStudentRow[]> {
+  const conds: string[] = [];
+  const binds: unknown[] = [];
+  if (lineAccountId) {
+    conds.push('f.line_account_id = ?');
+    binds.push(lineAccountId);
+  }
+  if (tagId) {
+    conds.push('EXISTS (SELECT 1 FROM friend_tags ft WHERE ft.friend_id = f.id AND ft.tag_id = ?)');
+    binds.push(tagId);
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+
+  const rows = await db
+    .prepare(
+      `SELECT f.id AS friend_id, f.display_name,
+              (SELECT MAX(finished_at) FROM bas_sessions s WHERE s.friend_id = f.id) AS last_played_at,
+              (SELECT COUNT(*) FROM bas_sessions s WHERE s.friend_id = f.id) AS sessions,
+              (SELECT COALESCE(SUM(total),0) FROM bas_sessions s WHERE s.friend_id = f.id) AS answers,
+              (SELECT COALESCE(SUM(correct),0) FROM bas_sessions s WHERE s.friend_id = f.id) AS correct,
+              (SELECT COUNT(DISTINCT question_id) FROM bas_answers a WHERE a.friend_id = f.id) AS tried
+       FROM friends f
+       ${where}
+       ORDER BY last_played_at DESC NULLS LAST, f.display_name ASC`,
+    )
+    .bind(...binds)
+    .all<Omit<BasStudentRow, 'rate' | 'weakest'>>();
+
+  const types = await getBasTypes(db);
+  const nameOf = new Map(types.map((t) => [t.code, t.name]));
+
+  const out: BasStudentRow[] = [];
+  for (const r of rows.results) {
+    let weakest: BasStudentRow['weakest'] = null;
+    if (r.sessions > 0) {
+      // 一覧の1行のためだけに全型の集計を回すのは重いので、ここだけ絞って引く
+      const w = await db
+        .prepare(
+          `WITH latest AS (
+             SELECT question_id, type_code, ok,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY question_id, type_code ORDER BY answered_at DESC, id DESC
+                    ) AS rn
+             FROM bas_answer_types WHERE friend_id = ?
+           )
+           SELECT type_code AS code, COUNT(*) AS tried, SUM(ok) AS ok
+           FROM latest WHERE rn = 1
+           GROUP BY type_code
+           HAVING COUNT(*) >= ?
+           ORDER BY (SUM(ok) * 1.0 / COUNT(*)) ASC, COUNT(*) DESC
+           LIMIT 1`,
+        )
+        .bind(r.friend_id, MIN_TRIED_FOR_WEAK)
+        .first<{ code: string; tried: number; ok: number }>();
+      if (w) {
+        weakest = {
+          code: w.code,
+          name: nameOf.get(w.code) ?? '',
+          rate: Math.round((w.ok / w.tried) * 100),
+          tried: w.tried,
+        };
+      }
+    }
+    out.push({
+      ...r,
+      rate: r.answers ? Math.round((r.correct / r.answers) * 100) : null,
+      weakest,
+    });
+  }
+  return out;
+}
+
+export interface BasStudentDetail {
+  dashboard: BasDashboard;
+  /** 直近で落とした問題。授業でそのまま扱えるように文と型を添える */
+  recent_wrong: {
+    question_id: number;
+    no: number;
+    sentence: string;
+    ja: string;
+    types: string[];
+    submitted: string[] | null;
+    timed_out: number;
+    answered_at: string;
+  }[];
+}
+
+export async function getBasStudentDetail(
+  db: D1Database,
+  friendId: string,
+  lineAccountId?: string | null,
+): Promise<BasStudentDetail> {
+  const dashboard = await getBasDashboard(db, friendId, lineAccountId ?? null);
+
+  // 「いま落としたままの問題」だけを出す。あとで正解し直したものは出さない
+  // （直近の解答だけを見るという指標の考え方に合わせる）。
+  const rows = await db
+    .prepare(
+      `WITH latest AS (
+         SELECT id, question_id, ok, submitted, timed_out, answered_at,
+                ROW_NUMBER() OVER (PARTITION BY question_id ORDER BY answered_at DESC, id DESC) AS rn
+         FROM bas_answers WHERE friend_id = ?
+       )
+       SELECT l.question_id, l.submitted, l.timed_out, l.answered_at,
+              q.no, q.sentence, q.ja, q.types
+       FROM latest l JOIN bas_questions q ON q.id = l.question_id
+       WHERE l.rn = 1 AND l.ok = 0
+       ORDER BY l.answered_at DESC
+       LIMIT 50`,
+    )
+    .bind(friendId)
+    .all<{
+      question_id: number;
+      submitted: string | null;
+      timed_out: number;
+      answered_at: string;
+      no: number;
+      sentence: string;
+      ja: string;
+      types: string;
+    }>();
+
+  return {
+    dashboard,
+    recent_wrong: rows.results.map((r) => ({
+      question_id: r.question_id,
+      no: r.no,
+      sentence: r.sentence,
+      ja: r.ja,
+      types: parseJsonArray(r.types),
+      submitted: r.submitted ? parseJsonArray(r.submitted) : null,
+      timed_out: r.timed_out,
+      answered_at: r.answered_at,
+    })),
+  };
+}
+
+/** セットの一覧に問題数を添えて返す（管理画面の「問題」タブ用）。 */
+export interface BasSetSummary extends BasSet {
+  count: number;
+  accepted_count: number;
+  extra_count: number;
+}
+
+export async function getBasSetSummaries(
+  db: D1Database,
+  lineAccountId?: string | null,
+): Promise<BasSetSummary[]> {
+  const rows = await db
+    .prepare(
+      `SELECT s.*,
+              (SELECT COUNT(*) FROM bas_questions q WHERE q.set_id = s.id) AS count,
+              (SELECT COUNT(*) FROM bas_questions q WHERE q.set_id = s.id AND q.accepted IS NOT NULL) AS accepted_count,
+              (SELECT COUNT(*) FROM bas_questions q WHERE q.set_id = s.id AND q.extra IS NOT NULL) AS extra_count
+       FROM bas_sets s
+       WHERE (s.line_account_id IS NULL OR s.line_account_id = ?)
+       ORDER BY s.sort ASC, s.id ASC`,
+    )
+    .bind(lineAccountId ?? null)
+    .all<BasSetSummary>();
+  return rows.results;
+}
+
+/** セットの有効・無効を切り替える。問題は消さない（解答履歴が参照している）。 */
+export async function setBasSetActive(
+  db: D1Database,
+  slug: string,
+  active: boolean,
+): Promise<void> {
+  await db
+    .prepare(`UPDATE bas_sets SET active = ? WHERE slug = ?`)
+    .bind(active ? 1 : 0, slug)
+    .run();
+}
