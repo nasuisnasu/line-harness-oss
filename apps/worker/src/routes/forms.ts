@@ -15,6 +15,7 @@ import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { Form as DbForm, FormSubmission as DbFormSubmission, FormType } from '@line-crm/db';
 import { notifyFormSubmitted, notifyScenarioEnrolled } from '../services/discord-notify.js';
 import { processStepDeliveries } from '../services/step-delivery.js';
+import { applyTagRichMenu } from '../lib/tag-rich-menu.js';
 import { LineClient } from '@line-crm/line-sdk';
 import type { Env } from '../index.js';
 
@@ -504,6 +505,8 @@ forms.post('/api/forms/:id/submit', async (c) => {
       const now = jstNow();
 
       const sideEffects: Promise<unknown>[] = [];
+      // 今回この提出で付いたタグ。タグ連動リッチメニューの引き当てに使う。
+      const appliedTagIds: string[] = [];
 
       // Save response data to friend's metadata
       if (form.save_to_metadata) {
@@ -523,6 +526,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
 
       // Add tag (form-level)
       if (form.on_submit_tag_id) {
+        appliedTagIds.push(form.on_submit_tag_id);
         sideEffects.push(addTagToFriend(db, friendId, form.on_submit_tag_id));
       }
 
@@ -542,6 +546,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
           const tagIds = field.optionTags[v];
           if (Array.isArray(tagIds)) {
             for (const tid of tagIds) {
+              appliedTagIds.push(tid);
               sideEffects.push(addTagToFriend(db, friendId, tid));
             }
           }
@@ -550,8 +555,10 @@ forms.post('/api/forms/:id/submit', async (c) => {
 
       // Pass / Fail tag from grading
       if (grade?.passed === true && form.pass_tag_id) {
+        appliedTagIds.push(form.pass_tag_id);
         sideEffects.push(addTagToFriend(db, friendId, form.pass_tag_id));
       } else if (grade?.passed === false && form.fail_tag_id) {
+        appliedTagIds.push(form.fail_tag_id);
         sideEffects.push(addTagToFriend(db, friendId, form.fail_tag_id));
       }
 
@@ -568,6 +575,12 @@ forms.post('/api/forms/:id/submit', async (c) => {
       if (sideEffects.length > 0) {
         await Promise.allSettled(sideEffects);
       }
+
+      // タグ連動リッチメニュー：受講登録フォームで「生徒」を選んだ人に受講生用メニューを出す。
+      // タグ付けが終わってから引く（順番が逆だと、まだ付いていないタグで探すことになる）。
+      c.executionCtx.waitUntil(
+        applyTagRichMenu(db, friendId, appliedTagIds, c.env.LINE_CHANNEL_ACCESS_TOKEN),
+      );
 
       // Fire scenario delivery immediately so the user doesn't wait for next 5-min cron tick.
       if (form.on_submit_scenario_id) {

@@ -265,6 +265,8 @@ function RichMenuForm({
   const [chatBarText, setChatBarText] = useState('メニュー')
   const [selected, setSelected] = useState(true)
   const [showOnFriendAdd, setShowOnFriendAdd] = useState(false)
+  const [autoLinkTagId, setAutoLinkTagId] = useState('')
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([])
   const [areas, setAreas] = useState<RichMenuAreaItem[]>([{ ...emptyArea }])
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
@@ -288,6 +290,9 @@ function RichMenuForm({
     void api.forms.list(params).then((r) => {
       if (r.success) setForms(r.data.map((f) => ({ id: f.id, name: f.name })))
     }).catch(() => {})
+    void api.tags.list(params).then((r) => {
+      if (r.success) setTags(r.data.map((t) => ({ id: t.id, name: t.name })))
+    }).catch(() => {})
   }, [lineAccountId])
 
   // 既存メニューのロード
@@ -300,6 +305,7 @@ function RichMenuForm({
         setChatBarText(res.data.chatBarText)
         setSelected(res.data.selected)
         setShowOnFriendAdd(res.data.showOnFriendAdd)
+        setAutoLinkTagId(res.data.autoLinkTagId ?? '')
         setAreas(res.data.areas.length > 0 ? res.data.areas : [{ ...emptyArea }])
         setSavedMenuId(res.data.id)
         if (res.data.lineRichmenuId) {
@@ -342,7 +348,7 @@ function RichMenuForm({
     setError('')
     try {
       if (savedMenuId) {
-        const res = await api.richMenus.update(savedMenuId, { name, sizeType, chatBarText, selected, areas })
+        const res = await api.richMenus.update(savedMenuId, { name, sizeType, chatBarText, selected, areas, autoLinkTagId: autoLinkTagId || null })
         if (!res.success) { setError(res.error); return null }
         // 友達追加時表示の切替
         if (showOnFriendAdd) {
@@ -350,7 +356,7 @@ function RichMenuForm({
         }
         return savedMenuId
       } else {
-        const res = await api.richMenus.create({ lineAccountId, name, sizeType, chatBarText, selected, areas, showOnFriendAdd })
+        const res = await api.richMenus.create({ lineAccountId, name, sizeType, chatBarText, selected, areas, showOnFriendAdd, autoLinkTagId: autoLinkTagId || null })
         if (!res.success) { setError(res.error); return null }
         setSavedMenuId(res.data.id)
         // 友達追加時表示が有効なら他のメニューを自動でOFFにする
@@ -432,6 +438,26 @@ function RichMenuForm({
             <label htmlFor="friendAdd" className="text-sm font-medium text-gray-800 cursor-pointer">友達追加時にこのメニューを自動表示する</label>
             <p className="text-xs text-gray-600 mt-0.5">同一アカウント内で1つだけ有効にできます。ONにすると他のメニューの「友達追加時表示」は自動でOFFになります。</p>
           </div>
+        </div>
+
+        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded">
+          <label htmlFor="autoLinkTag" className="block text-sm font-medium text-gray-800">このタグが付いた人に自動表示する</label>
+          <p className="text-xs text-gray-600 mt-0.5 mb-2">
+            フォーム送信や手動でこのタグが付いた瞬間に、その人のメニューをこれに切り替えます。
+            例：受講登録フォームで「生徒」を選んだ人に受講生用メニューを出す。
+          </p>
+          <select
+            id="autoLinkTag"
+            value={autoLinkTagId}
+            onChange={e => setAutoLinkTagId(e.target.value)}
+            className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-white"
+          >
+            <option value="">連動しない</option>
+            {tags.map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">画像を公開していないメニューは連動しません（先に公開してください）。</p>
         </div>
 
         <div>

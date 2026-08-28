@@ -15,6 +15,7 @@ import {
 } from '@line-crm/db';
 import type { Friend as DbFriend, Tag as DbTag } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
+import { applyTagRichMenu } from '../lib/tag-rich-menu.js';
 import { notifyScenarioEnrolled } from '../services/discord-notify.js';
 import type { Env } from '../index.js';
 
@@ -609,6 +610,10 @@ friends.post('/api/friends/:id/tags', async (c) => {
 
     // イベントバス発火: tag_change
     await fireEvent(db, 'tag_change', { friendId, eventData: { tagId: body.tagId, action: 'add' } });
+
+    // タグ連動リッチメニュー。手で付けたときもフォーム送信と同じ結果になるようにする
+    // （既存の生徒にメニューを出すには、この経路しかない）。
+    await applyTagRichMenu(db, friendId, [body.tagId], c.env.LINE_CHANNEL_ACCESS_TOKEN);
 
     return c.json({ success: true, data: null }, 201);
   } catch (err) {

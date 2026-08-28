@@ -977,6 +977,7 @@ export const api = {
       areas: RichMenuAreaItem[]
       isDefault?: boolean
       showOnFriendAdd?: boolean
+      autoLinkTagId?: string | null
     }) =>
       fetchApi<ApiResponse<RichMenuItem>>('/api/rich-menus', {
         method: 'POST',
@@ -988,6 +989,7 @@ export const api = {
       chatBarText?: string
       selected?: boolean
       areas?: RichMenuAreaItem[]
+      autoLinkTagId?: string | null
     }) =>
       fetchApi<ApiResponse<RichMenuItem>>(`/api/rich-menus/${id}`, {
         method: 'PUT',
@@ -1171,6 +1173,8 @@ export interface RichMenuItem {
   areas: RichMenuAreaItem[]
   isDefault: boolean
   showOnFriendAdd: boolean
+  /** このタグが付いた友だちに自動でこのメニューを出す（タグ連動リッチメニュー） */
+  autoLinkTagId: string | null
   createdAt: string
   updatedAt: string
 }

@@ -25,6 +25,8 @@ export interface RichMenu {
   areas_json: string;
   is_default: number;
   show_on_friend_add: number;
+  /** このタグが付いた友だちに自動でリンクするリッチメニュー（タグ連動） */
+  auto_link_tag_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +40,7 @@ export interface CreateRichMenuInput {
   areas: RichMenuArea[];
   isDefault?: boolean;
   showOnFriendAdd?: boolean;
+  autoLinkTagId?: string | null;
 }
 
 export async function createRichMenuRecord(
@@ -49,8 +52,8 @@ export async function createRichMenuRecord(
 
   await db
     .prepare(
-      `INSERT INTO rich_menus (id, line_account_id, name, size_type, chat_bar_text, selected, areas_json, is_default, show_on_friend_add, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO rich_menus (id, line_account_id, name, size_type, chat_bar_text, selected, areas_json, is_default, show_on_friend_add, auto_link_tag_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -62,6 +65,7 @@ export async function createRichMenuRecord(
       JSON.stringify(input.areas),
       input.isDefault ? 1 : 0,
       input.showOnFriendAdd ? 1 : 0,
+      input.autoLinkTagId ?? null,
       now,
       now,
     )
@@ -112,6 +116,33 @@ export async function getFriendAddRichMenu(
     .first<RichMenu>();
 }
 
+/**
+ * タグ連動リッチメニューの引き当て。
+ *
+ * 付いたタグのどれかに紐づく、その友だちのOAのリッチメニューを返す。
+ * まだ画像を上げていない（line_richmenu_id が無い）メニューは LINE 側に存在しない
+ * ので除外する。渡さなければ LINE API が 400 を返すだけで、何が悪いのか読めない。
+ */
+export async function getRichMenusByAutoLinkTags(
+  db: D1Database,
+  lineAccountId: string,
+  tagIds: string[],
+): Promise<RichMenu[]> {
+  if (tagIds.length === 0) return [];
+  const ph = tagIds.map(() => '?').join(',');
+  const result = await db
+    .prepare(
+      `SELECT * FROM rich_menus
+       WHERE line_account_id = ?
+         AND auto_link_tag_id IN (${ph})
+         AND line_richmenu_id IS NOT NULL
+       ORDER BY created_at DESC`,
+    )
+    .bind(lineAccountId, ...tagIds)
+    .all<RichMenu>();
+  return result.results;
+}
+
 export interface UpdateRichMenuInput {
   name?: string;
   lineRichmenuId?: string | null;
@@ -121,6 +152,7 @@ export interface UpdateRichMenuInput {
   areas?: RichMenuArea[];
   isDefault?: boolean;
   showOnFriendAdd?: boolean;
+  autoLinkTagId?: string | null;
 }
 
 export async function updateRichMenuRecord(
@@ -139,6 +171,7 @@ export async function updateRichMenuRecord(
   if (input.areas !== undefined) { fields.push('areas_json = ?'); values.push(JSON.stringify(input.areas)); }
   if (input.isDefault !== undefined) { fields.push('is_default = ?'); values.push(input.isDefault ? 1 : 0); }
   if (input.showOnFriendAdd !== undefined) { fields.push('show_on_friend_add = ?'); values.push(input.showOnFriendAdd ? 1 : 0); }
+  if (input.autoLinkTagId !== undefined) { fields.push('auto_link_tag_id = ?'); values.push(input.autoLinkTagId || null); }
 
   if (fields.length === 0) return getRichMenuById(db, id);
 

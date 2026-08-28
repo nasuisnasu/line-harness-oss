@@ -34,6 +34,7 @@ function serialize(row: RichMenu) {
     areas: parseRichMenuAreas(row),
     isDefault: Boolean(row.is_default),
     showOnFriendAdd: Boolean(row.show_on_friend_add),
+    autoLinkTagId: row.auto_link_tag_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -85,6 +86,7 @@ richMenus.post('/api/rich-menus', async (c) => {
       areas: RichMenuArea[];
       isDefault?: boolean;
       showOnFriendAdd?: boolean;
+      autoLinkTagId?: string | null;
     }>();
     if (!body.lineAccountId || !body.name || !body.sizeType) {
       return c.json({ success: false, error: 'lineAccountId, name, sizeType are required' }, 400);
@@ -98,6 +100,7 @@ richMenus.post('/api/rich-menus', async (c) => {
       areas: body.areas || [],
       isDefault: body.isDefault,
       showOnFriendAdd: body.showOnFriendAdd,
+      autoLinkTagId: body.autoLinkTagId,
     });
     return c.json({ success: true, data: serialize(created) }, 201);
   } catch (err) {
@@ -119,6 +122,7 @@ richMenus.put('/api/rich-menus/:id', async (c) => {
       chatBarText?: string;
       selected?: boolean;
       areas?: RichMenuArea[];
+      autoLinkTagId?: string | null;
     }>();
 
     // Persist DB changes first.
