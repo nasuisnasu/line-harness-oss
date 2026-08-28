@@ -139,7 +139,7 @@ const MODE = { subject: 'en' };
  * LINE内ブラウザはHTMLを強くキャッシュするので「直したはずなのに変わらない」が起きる。
  * この表示を見ればキャッシュか実装かが1往復で切り分く。**中身を変えたら値も上げること。**
  */
-const BUILD = '2026-08-28a';
+const BUILD = '2026-08-28b';
 
 /** 範囲は100語ブロック単位でしか選ばせない。キリ番以外を使う場面が無いため。 */
 const BLOCK = 100;
@@ -631,26 +631,35 @@ async function showHome(): Promise<void> {
       : '';
 
   // ホームはスクロールなしで収める。推移・弱点語・累計は「テスト結果を見る」に置く。
-  // ホームは実力テスト1本に絞る。セクションごとの定着率はテストタブ、
-  // 数字は実力テストのスコア1本。同じことを2箇所で言わない。
-  const body = hasHistory
-    ? catBar() +
-      checkupCard(book) +
-      // 問題数はここで選ばせない。チップを置くと1行ぶん使って推移グラフを圧迫する。
-      // タップ数は変わらない（チップ→ボタン が ボタン→問題数 になるだけ）。文法テストと同じ。
-      '<button class="v-go" id="vCheckup">実力テストを受ける</button>' +
-      '<button class="v-ghost" id="vStart">セクションテストを受ける</button>' +
-      reviewBlock +
-      (MODE.subject === 'en' ? bookRow(book) : '')
-    : // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
-      catBar() +
-      checkupCard(book) +
-      `<div class="v-lead">
+  // セクションごとの定着率はテストタブ、数字は実力テストのスコア1本。
+  // 同じことを2箇所で言わない。
+  //
+  // **ボタンは枝ごとに並べ直さず、1か所で組む。**
+  // 履歴あり／なしで別々に並べていたせいで、履歴ゼロの枝に実力テストのボタンだけ
+  // 無い状態になっていた。実機は必ず履歴ゼロから始まるので、
+  // 「スコアの説明カードは出ているのに受ける導線が無い」を全員が踏む。
+  // 出す・出さないの分岐ではなく、**どちらを主導線にするか**だけを変える。
+  //
+  // 問題数はここで選ばせない。チップを置くと1行ぶん使って推移グラフを圧迫する。
+  // タップ数は変わらない（チップ→ボタン が ボタン→問題数 になるだけ）。文法テストと同じ。
+  const checkupBtn = `<button class="${hasHistory ? 'v-go' : 'v-ghost'}" id="vCheckup">実力テストを受ける</button>`;
+  const sectionBtn = `<button class="${hasHistory ? 'v-ghost' : 'v-go'}" id="vStart">セクションテストを受ける</button>`;
+
+  const body =
+    catBar() +
+    checkupCard(book) +
+    // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
+    (hasHistory
+      ? ''
+      : `<div class="v-lead">
          <div class="cap">${esc(book.name)}</div>
          <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは20語やってみましょう</div>
-       </div>
-       <button class="v-go" id="vStart">セクションテストを受ける</button>` +
-      (MODE.subject === 'en' ? bookRow(book) : '');
+       </div>`) +
+    // 1問目からいきなり実力テストに行かせない。最初はセクションテストを主導線にして、
+    // 実力テストは受けられる状態で下に置く。
+    (hasHistory ? checkupBtn + sectionBtn : sectionBtn + checkupBtn) +
+    reviewBlock +
+    (MODE.subject === 'en' ? bookRow(book) : '');
 
   app().innerHTML = shell(
     '',
