@@ -416,6 +416,10 @@ async function main() {
       await initEijaku(formId);
     } else if (page === 'vocab') {
       await initVocab();
+    } else if (page === 'kobun') {
+      // 古文単語テスト。英単語テストとは**別のテスト**として開く
+      // （単語帳を切り替える形にすると、記録も設定も英単語と混ざる）。
+      await initVocab('kobun');
     } else if (page === 'course') {
       // 文法講座は講義とテストに分岐する。リッチメニュー1枠から2つの行き先へ
       await initCourseMenu();

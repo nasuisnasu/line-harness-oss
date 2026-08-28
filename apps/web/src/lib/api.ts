@@ -200,10 +200,12 @@ export const api = {
    * 渡さないと複数OAの生徒が混ざる。
    */
   vocab: {
-    students: (params: { lineAccountId?: string; tagId?: string }) => {
+    students: (params: { lineAccountId?: string; tagId?: string; bookId?: number }) => {
       const q = new URLSearchParams()
       if (params.lineAccountId) q.set('lineAccountId', params.lineAccountId)
       if (params.tagId) q.set('tagId', params.tagId)
+      // 単語帳を絞る（古文単語テストの画面）。渡さないと生徒が選んでいる単語帳になる
+      if (params.bookId) q.set('book_id', String(params.bookId))
       return fetchApi<{ success: boolean; students: VocabStudentRow[] }>(
         '/api/vocab/admin/students?' + q.toString()
       )
@@ -217,7 +219,10 @@ export const api = {
         '/api/vocab/admin/sessions/' + sessionId + '/answers'
       ),
     books: (lineAccountId?: string) =>
-      fetchApi<{ success: boolean; books: { id: number; name: string; count: number }[] }>(
+      fetchApi<{
+        success: boolean
+        books: { id: number; name: string; count: number; subject: string }[]
+      }>(
         '/api/vocab/admin/books' + (lineAccountId ? '?lineAccountId=' + lineAccountId : '')
       ),
   },
@@ -225,6 +230,41 @@ export const api = {
    * 文法テスト（受講生専用）。単語テストと同じく、一覧には必ず
    * `{ lineAccountId: selectedAccount.id }` を渡すこと。渡さないと複数OAの生徒が混ざる。
    */
+  /**
+   * 並び替えテスト（Build a Sentence）。
+   * 生徒にセットを選ばせないので、問題集ではなく**プール全体**を見る。
+   * つまずきは分野ではなく型（A1〜G4）で出す。
+   */
+  bas: {
+    students: (params: { lineAccountId?: string; tagId?: string }) => {
+      const q = new URLSearchParams()
+      if (params.lineAccountId) q.set('lineAccountId', params.lineAccountId)
+      if (params.tagId) q.set('tagId', params.tagId)
+      return fetchApi<{ success: boolean; students: BasStudentRow[] }>(
+        '/api/bas/admin/students?' + q.toString()
+      )
+    },
+    student: (friendId: string, lineAccountId?: string) =>
+      fetchApi<{ success: boolean } & BasStudentDetail>(
+        '/api/bas/admin/students/' +
+          friendId +
+          (lineAccountId ? '?lineAccountId=' + lineAccountId : '')
+      ),
+    types: () => fetchApi<{ success: boolean; types: BasType[] }>('/api/bas/admin/types'),
+    sets: (lineAccountId?: string) =>
+      fetchApi<{ success: boolean; sets: BasSetSummary[] }>(
+        '/api/bas/admin/sets' + (lineAccountId ? '?lineAccountId=' + lineAccountId : '')
+      ),
+    setActive: (slug: string, active: boolean, lineAccountId?: string) =>
+      fetchApi<{ success: boolean; sets: BasSetSummary[] }>(
+        '/api/bas/admin/sets/' +
+          encodeURIComponent(slug) +
+          '/active' +
+          (lineAccountId ? '?lineAccountId=' + lineAccountId : ''),
+        { method: 'POST', body: JSON.stringify({ active }) }
+      ),
+  },
+
   grammar: {
     students: (params: { lineAccountId?: string; tagId?: string; bookIds?: number[] }) => {
       const q = new URLSearchParams()
@@ -1586,4 +1626,99 @@ export type VocabStudentDetail = {
   sections: VocabSectionStat[]
   review_words: VocabWordRow[]
   trend: VocabTrendPoint[]
+}
+
+
+// ── 並び替えテスト（Build a Sentence） ──────────────────────────────────────
+
+/** 攻略ブックの型カタログ（A1〜G4）。弱点集計の軸になる。 */
+export interface BasType {
+  code: string
+  group_code: string
+  group_name: string
+  name: string
+  hint: string | null
+  sort: number
+}
+
+export interface BasTypeStat extends BasType {
+  /** プールにこの型を含む問題が何問あるか */
+  total: number
+  /** そのうち1回以上解いた問題数（直近の解答ベース） */
+  tried: number
+  ok: number
+  /** 0〜100。tried が 0 なら 0 なので、画面では「未挑戦」と出し分ける */
+  rate: number
+}
+
+export interface BasGroupStat {
+  code: string
+  name: string
+  total: number
+  tried: number
+  ok: number
+  rate: number
+  types: BasTypeStat[]
+}
+
+export interface BasStudentRow {
+  friend_id: string
+  display_name: string | null
+  last_played_at: string | null
+  sessions: number
+  /** 解いた問題の延べ数（同じ問題を2回解けば2） */
+  answers: number
+  correct: number
+  rate: number | null
+  /** 手をつけた問題の数（重複を除く） */
+  tried: number
+  weakest: { code: string; name: string; rate: number; tried: number } | null
+}
+
+export interface BasDashboard {
+  pool: number
+  tried: number
+  sessions: number
+  answered: number
+  correct: number
+  rate: number
+  groups: BasGroupStat[]
+  weak: BasTypeStat[]
+  recent: {
+    id: number
+    kind: string
+    focus_type: string | null
+    timer_sec: number
+    total: number
+    correct: number
+    finished_at: string
+  }[]
+}
+
+export interface BasStudentDetail {
+  dashboard: BasDashboard
+  /** いま落としたままの問題。あとで解き直して正解したものは入らない */
+  recent_wrong: {
+    question_id: number
+    no: number
+    sentence: string
+    ja: string
+    types: string[]
+    submitted: string[] | null
+    timed_out: number
+    answered_at: string
+  }[]
+}
+
+export interface BasSetSummary {
+  id: number
+  slug: string
+  name: string
+  line_account_id: string | null
+  sort: number
+  active: number
+  created_at: string
+  count: number
+  accepted_count: number
+  extra_count: number
 }

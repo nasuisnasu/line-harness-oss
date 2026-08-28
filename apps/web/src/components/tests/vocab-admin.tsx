@@ -1,0 +1,233 @@
+'use client'
+
+/**
+ * 単語テストの管理画面（英単語・古文で共有）。
+ *
+ * 知りたいのは「誰が・どれだけ・どんな設定で」の3つだけ。
+ * ランキングや「サボっている」の判定は出さない。事実だけを並べる。
+ *
+ * 一覧は**受講生タグ（VOCAB_ALLOW_TAG_ID）持ちだけ**。絞り込みはサーバー側の既定で、
+ * 単語テストを開ける人と完全に一致する。保護者やタグ無しが混ざると「未実施◯人」が
+ * 意味を失うため。
+ *
+ * **`subject` が 'en' 以外のときは、その教科の単語帳1冊に固定して数える。**
+ * 古文は生徒から見て別のテスト（LIFFの入り口も別）なので、
+ * 渡さないと英単語の行に古文の実施回数が混ざる。
+ */
+
+import { useEffect, useState, useCallback } from 'react'
+import { api, type VocabStudentRow } from '@/lib/api'
+import Header from '@/components/layout/header'
+import { useAccount } from '@/lib/account-context'
+import VocabStudentDetailPanel from '@/app/vocab/student-detail'
+
+/** これ以上実施がない生徒は行を薄くする（色は足さない）。 */
+const STALE_DAYS = 7
+
+function daysSince(iso: string | null): number | null {
+  if (!iso) return null
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return null
+  return Math.floor((Date.now() - t) / 86_400_000)
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—'
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[2]}/${m[3]}` : iso
+}
+
+function pct(v: number | null): string {
+  return v === null ? '—' : `${Math.round(v * 100)}%`
+}
+
+export default function VocabAdmin({
+  title,
+  subject = 'en',
+}: {
+  title: string
+  /** 'en' | 'kobun'。'en' 以外はその教科の単語帳に固定する */
+  subject?: string
+}) {
+  const { selectedAccount } = useAccount()
+  const [students, setStudents] = useState<VocabStudentRow[]>([])
+  // 教科で単語帳を1冊に決める。決まるまで一覧は読みに行かない
+  // （決まる前に読むと「本人が選んだ単語帳」で1回描いてしまい、数字がちらつく）。
+  const [bookId, setBookId] = useState<number | null>(null)
+  // 静的エクスポート構成なので動的ルート（/vocab/[friendId]）が使えない。
+  // 詳細は同じページ内で切り替える。
+  const [selected, setSelected] = useState<VocabStudentRow | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (subject === 'en' || !selectedAccount) return
+    let alive = true
+    api.vocab
+      .books(selectedAccount.id)
+      .then((res) => {
+        if (alive) setBookId(res.books.find((b) => b.subject === subject)?.id ?? null)
+      })
+      .catch(() => {
+        /* 読めなければ単語帳を絞らないだけ。一覧は出す */
+      })
+    return () => {
+      alive = false
+    }
+  }, [selectedAccount, subject])
+
+  const load = useCallback(async () => {
+    if (!selectedAccount) return
+    setLoading(true)
+    setError('')
+    try {
+      // lineAccountId は必ず渡す。渡さないと複数OAの生徒が混ざる。
+      const res = await api.vocab.students({
+        lineAccountId: selectedAccount.id,
+        ...(bookId ? { bookId } : {}),
+      })
+      setStudents(res.students ?? [])
+    } catch {
+      setError('読み込みに失敗しました')
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedAccount, bookId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const played = students.filter((s) => s.sessions > 0).length
+
+  return (
+    <div className="flex-1 overflow-auto">
+      <Header title={title} />
+      <div className="p-6">
+        {selected ? (
+          <VocabStudentDetailPanel
+            friendId={selected.friend_id}
+            displayName={selected.display_name}
+            onBack={() => setSelected(null)}
+            fixedBookId={bookId ?? undefined}
+            subject={subject}
+          />
+        ) : (
+        <>
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="mb-4 flex flex-wrap gap-4 text-sm text-gray-600">
+          <span>
+            生徒 <b className="text-gray-900">{students.length}</b> 人
+          </span>
+          <span>
+            実施あり <b className="text-gray-900">{played}</b> 人
+          </span>
+          <span>
+            未実施 <b className="text-gray-900">{students.length - played}</b> 人
+          </span>
+        </div>
+
+        {loading ? (
+          <p className="py-10 text-center text-sm text-gray-500">読み込み中...</p>
+        ) : students.length === 0 ? (
+          <p className="py-10 text-center text-sm text-gray-500">
+            「生徒」タグが付いた友だちがいません。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {students.map((s) => {
+              const d = daysSince(s.last_played_at)
+              const stale = d === null || d >= STALE_DAYS
+              const w1 = s.total ? (s.mastered / s.total) * 100 : 0
+              const w2 = s.total ? (s.unmastered / s.total) * 100 : 0
+              return (
+                <button
+                  key={s.friend_id}
+                  onClick={() => setSelected(s)}
+                  className="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left transition hover:border-gray-300 hover:shadow-sm"
+                >
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="text-base font-semibold text-gray-900">
+                      {s.display_name || '(名前なし)'}
+                    </span>
+                    {s.book_name && <span className="text-xs text-gray-500">{s.book_name}</span>}
+                    <span className={`ml-auto text-xs ${stale ? 'text-gray-400' : 'text-gray-500'}`}>
+                      最終実施 {fmtDate(s.last_played_at)}
+                      {d !== null && d >= STALE_DAYS && <span className="ml-1">（{d}日前）</span>}
+                      {d === null && <span className="ml-1">（未実施）</span>}
+                    </span>
+                  </div>
+
+                  {s.sessions === 0 ? (
+                    <p className="mt-3 text-sm text-gray-400">まだテストを実施していません。</p>
+                  ) : (
+                    <>
+                      {/* 講師が最初に見る数字は実力テストのスコア。カバー率ではない */}
+                      <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                        <span className="text-xs text-gray-500">実力テスト</span>
+                        {s.checkup_score === null ? (
+                          <span className="text-sm text-gray-400">未受験</span>
+                        ) : (
+                          <>
+                            <b className="text-2xl tabular-nums text-gray-900">{pct(s.checkup_score)}</b>
+                            <span className="text-xs text-gray-500">
+                              直近{s.checkup_sessions}回の加重平均
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-gray-100">
+                        <span className="block h-full bg-emerald-500" style={{ width: `${w1.toFixed(1)}%` }} />
+                        <span className="block h-full bg-red-400" style={{ width: `${w2.toFixed(1)}%` }} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
+                        <span>
+                          学習済み{' '}
+                          <b className="tabular-nums text-gray-900">{s.mastered + s.unmastered}</b>
+                          {' / '}
+                          <span className="tabular-nums">{s.total}</span> 語
+                        </span>
+                        <span>
+                          復習が必要{' '}
+                          <b className={`tabular-nums ${s.unmastered > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                            {s.unmastered}
+                          </b>
+                        </span>
+                        <span>
+                          直近のセクションテスト{' '}
+                          <b className="tabular-nums text-gray-900">{pct(s.latest_rate)}</b>
+                        </span>
+                        <span>
+                          実施 <b className="tabular-nums text-gray-900">{s.sessions}</b> 回
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+
+                  <p className="mt-3 text-xs text-blue-600">
+                    クリックすると、実力テストの推移・セクション別の定着率・何で間違えているかが開きます →
+                  </p>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <p className="mt-4 text-xs text-gray-500">
+          「生徒」タグが付いている友だちだけを出しています（単語テストを開けるのはタグ持ちだけなので、
+          この一覧＝使える人の一覧です）。未実施の生徒も末尾に出しています。誰が手をつけていないかが
+          分かることのほうが大事なためです。
+        </p>
+        </>
+        )}
+      </div>
+    </div>
+  )
+}

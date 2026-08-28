@@ -121,12 +121,25 @@ type Kind = 'normal' | 'review' | 'retry' | 'checkup';
 // ── 状態 ────────────────────────────────────────────────────────────────────
 
 /**
+ * どの教科の単語テストとして開いているか。
+ *
+ * **古文は英単語テストの中の1冊ではなく、別の入り口（`?page=kobun`）で開く独立したテスト。**
+ * 生徒から見て別物だし、リッチメニューの枠も別なので、画面も記録も混ぜない。
+ * ここが 'en' 以外のときは、
+ *   - その教科の単語帳しか見せない（切り替えボタンも出さない）
+ *   - **選んだ単語帳をサーバーに保存しない。** 保存は生徒ごとに1つしか持てないので、
+ *     古文を開くと英単語テストの選択まで書き換わってしまう
+ *   - ホームの数字（解いた問題・学習日数・推移）もその1冊だけで数える
+ */
+const MODE = { subject: 'en' };
+
+/**
  * ホーム最下部に出す版。
  *
  * LINE内ブラウザはHTMLを強くキャッシュするので「直したはずなのに変わらない」が起きる。
  * この表示を見ればキャッシュか実装かが1往復で切り分く。**中身を変えたら値も上げること。**
  */
-const BUILD = '2026-08-27a';
+const BUILD = '2026-08-28a';
 
 /** 範囲は100語ブロック単位でしか選ばせない。キリ番以外を使う場面が無いため。 */
 const BLOCK = 100;
@@ -158,7 +171,7 @@ const cfg = {
  * 例文穴埋めも英文の空所を埋める形式なので古文には無い。
  */
 function isKobun(): boolean {
-  return state.books.find((b) => b.id === cfg.bookId)?.subject === 'kobun';
+  return MODE.subject === 'kobun';
 }
 
 /** 出題の向きの呼び名。記録画面と設定画面で同じ言い方をする。 */
@@ -282,7 +295,7 @@ function navBar(active: Tab): string {
 function shell(title: string, sub: string, body: string, count = '', tab: Tab = 'home'): string {
   return `
 <div class="v-top">
-  <span class="ttl">単語テスト</span>
+  <span class="ttl">${MODE.subject === 'kobun' ? '古文単語テスト' : '単語テスト'}</span>
   <span class="rng">${esc(sub)}</span>
   ${count ? `<span class="cnt">${esc(count)}</span>` : ''}
 </div>
@@ -518,7 +531,12 @@ ${canCancel ? '<button class="v-ghost" id="vCancel">やめる</button>' : ''}`;
       state.switchingBook = true;
       const bookId = Number(el.dataset.book);
       try {
-        await api('/api/vocab/book', { method: 'PUT', body: JSON.stringify({ book_id: bookId }) });
+        // **英単語テストのときだけサーバーに覚えさせる。**
+        // 選択は生徒ごとに1つしか持てないので、古文で保存すると
+        // 英単語テストを開いたときの単語帳まで書き換わる（`MODE` のコメント）。
+        if (MODE.subject === 'en') {
+          await api('/api/vocab/book', { method: 'PUT', body: JSON.stringify({ book_id: bookId }) });
+        }
         cfg.bookId = bookId;
         resetRangeForBook();
         state.dashboard = null;
@@ -558,11 +576,13 @@ async function showHome(): Promise<void> {
   try {
     const [booksRes, dash] = await Promise.all([
       api<{ books: Book[] }>('/api/vocab/books'),
-      api<Dashboard>('/api/vocab/dashboard'),
+      // 古文は自分の1冊だけで数える。単語帳を指定しないと、解いた問題も学習日数も
+      // 推移のグラフも英単語テストと合算されてしまう。
+      api<Dashboard>(`/api/vocab/dashboard?subject=${MODE.subject}`),
       // 目標日も一緒に取る。落ちても既定で描くので画面は止めない
       loadGoal(),
     ]);
-    state.books = booksRes.books;
+    state.books = booksRes.books.filter((b) => (b.subject ?? 'en') === MODE.subject);
     state.dashboard = dash;
   } catch (e) {
     renderError(e instanceof Error ? e.message : '読み込みに失敗しました');
@@ -575,13 +595,18 @@ async function showHome(): Promise<void> {
     return;
   }
 
-  // 未選択なら選択画面から。選択済みならその1冊だけを見せる。
-  if (!d.selected_book_id) {
+  // 英単語以外は選択画面を出さない。入り口がテストごとに分かれていて、
+  // その教科の単語帳は（いまは）1冊しかない。
+  if (MODE.subject !== 'en') {
+    if (cfg.bookId !== state.books[0].id) {
+      cfg.bookId = state.books[0].id;
+      resetRangeForBook();
+    }
+  } else if (!d.selected_book_id) {
     cfg.bookId = 0;
     renderBookPicker(false);
     return;
-  }
-  if (cfg.bookId !== d.selected_book_id) {
+  } else if (cfg.bookId !== d.selected_book_id) {
     cfg.bookId = d.selected_book_id;
     resetRangeForBook();
   }
@@ -616,7 +641,7 @@ async function showHome(): Promise<void> {
       '<button class="v-go" id="vCheckup">実力テストを受ける</button>' +
       '<button class="v-ghost" id="vStart">セクションテストを受ける</button>' +
       reviewBlock +
-      bookRow(book)
+      (MODE.subject === 'en' ? bookRow(book) : '')
     : // 空の状態。「記録がありません」で終わらせず、次にやることを出す。
       catBar() +
       checkupCard(book) +
@@ -625,7 +650,7 @@ async function showHome(): Promise<void> {
          <div class="n" style="font-size:20px;font-family:inherit;font-weight:700">まずは20語やってみましょう</div>
        </div>
        <button class="v-go" id="vStart">セクションテストを受ける</button>` +
-      bookRow(book);
+      (MODE.subject === 'en' ? bookRow(book) : '');
 
   app().innerHTML = shell(
     '',
@@ -1566,7 +1591,12 @@ document.addEventListener('keydown', (e) => {
 
 // ── 入口 ────────────────────────────────────────────────────────────────────
 
-export async function initVocab(): Promise<void> {
+/**
+ * @param subject 'en'（英単語テスト）か 'kobun'（古文単語テスト）。
+ *   入り口ごとに別のテストとして開く。`MODE` のコメントを読むこと。
+ */
+export async function initVocab(subject = 'en'): Promise<void> {
+  MODE.subject = subject;
   injectStyles();
   await showHome();
 }

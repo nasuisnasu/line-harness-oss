@@ -672,8 +672,23 @@ export async function getVocabDashboard(
   db: D1Database,
   friendId: string,
   lineAccountId?: string | null,
+  /**
+   * 'en' | 'kobun'。指定すると**その教科だけ**で数える。
+   * 古文は英単語テストとは別の入り口で開く独立したテストなので、
+   * 解いた問題・学習日数・推移のグラフを合算してはいけない。
+   */
+  subject?: string | null,
 ): Promise<VocabDashboard> {
-  const books = await getVocabBooks(db, lineAccountId);
+  const all = await getVocabBooks(db, lineAccountId);
+  const books = subject ? all.filter((b) => b.subject === subject) : all;
+  // 合計と推移をこの教科の単語帳だけに絞るための WHERE 句。
+  // 単語帳が1冊も無ければ 0 件に落とす（IN () は SQLite で構文エラーになる）。
+  const bookIds = books.map((b) => b.id);
+  const scope = subject
+    ? bookIds.length
+      ? ` AND book_id IN (${bookIds.join(',')})`
+      : ' AND 0'
+    : '';
 
   const dashboardBooks: DashboardBook[] = [];
   for (const b of books) {
@@ -716,7 +731,7 @@ export async function getVocabDashboard(
   const recentRows = await db
     .prepare(
       `SELECT finished_at AS at, total, correct, kind
-       FROM vocab_sessions WHERE friend_id = ? AND kind NOT IN ('retry', 'checkup')
+       FROM vocab_sessions WHERE friend_id = ? AND kind NOT IN ('retry', 'checkup')${scope}
        ORDER BY finished_at DESC, id DESC LIMIT 10`,
     )
     .bind(friendId)
@@ -732,12 +747,20 @@ export async function getVocabDashboard(
     }))
     .reverse(); // 古い→新しい（グラフの並び）
 
+  // vocab_answers に book_id は無いので、語をたどって絞る
+  const ansScope = subject
+    ? bookIds.length
+      ? ` AND EXISTS (SELECT 1 FROM vocab_words w
+                      WHERE w.id = vocab_answers.word_id AND w.book_id IN (${bookIds.join(',')}))`
+      : ' AND 0'
+    : '';
   const totals = await db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM vocab_answers WHERE friend_id = ?1) AS answers,
-         (SELECT COUNT(*) FROM vocab_sessions WHERE friend_id = ?1) AS sessions,
-         (SELECT COUNT(DISTINCT substr(finished_at, 1, 10)) FROM vocab_sessions WHERE friend_id = ?1) AS days`,
+         (SELECT COUNT(*) FROM vocab_answers WHERE friend_id = ?1${ansScope}) AS answers,
+         (SELECT COUNT(*) FROM vocab_sessions WHERE friend_id = ?1${scope}) AS sessions,
+         (SELECT COUNT(DISTINCT substr(finished_at, 1, 10))
+            FROM vocab_sessions WHERE friend_id = ?1${scope}) AS days`,
     )
     .bind(friendId)
     .first<{ answers: number; sessions: number; days: number }>();
@@ -1122,6 +1145,11 @@ export async function getVocabStudents(
   db: D1Database,
   lineAccountId?: string | null,
   tagId?: string | null,
+  /**
+   * 指定するとその単語帳だけで数える（古文単語テストの管理画面はこれを渡す）。
+   * 渡さないと「本人が選んだ単語帳」になるので、英単語の行に古文の実施回数が混ざる。
+   */
+  bookId?: number | null,
 ): Promise<VocabStudentRow[]> {
   const conds: string[] = [];
   const binds: unknown[] = [];
@@ -1135,6 +1163,8 @@ export async function getVocabStudents(
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
+  // LEFT JOIN の条件に入れる（WHERE に入れると未実施の生徒が消える）
+  const joinBook = bookId ? ' AND s.book_id = ?' : '';
   const rows = await db
     .prepare(
       `SELECT f.id AS friend_id, f.display_name,
@@ -1142,12 +1172,12 @@ export async function getVocabStudents(
               COUNT(DISTINCT s.id) AS sessions,
               COALESCE(SUM(s.total), 0) AS answers
        FROM friends f
-       LEFT JOIN vocab_sessions s ON s.friend_id = f.id
+       LEFT JOIN vocab_sessions s ON s.friend_id = f.id${joinBook}
        ${where}
        GROUP BY f.id
        ORDER BY (last_played_at IS NULL) ASC, last_played_at DESC, f.created_at DESC`,
     )
-    .bind(...binds)
+    .bind(...(bookId ? [bookId, ...binds] : binds))
     .all<VocabStudentRow>();
 
   const out: VocabStudentRow[] = [];
@@ -1155,23 +1185,25 @@ export async function getVocabStudents(
     const latest = await db
       .prepare(
         `SELECT total, correct FROM vocab_sessions
-         WHERE friend_id = ? AND kind <> 'retry'
+         WHERE friend_id = ? AND kind <> 'retry'${bookId ? ' AND book_id = ?' : ''}
          ORDER BY finished_at DESC, id DESC LIMIT 1`,
       )
-      .bind(r.friend_id)
+      .bind(...(bookId ? [r.friend_id, bookId] : [r.friend_id]))
       .first<{ total: number; correct: number }>();
 
     // 一覧の時点で習得率まで出す。名前と実施回数だけでは、誰に声をかけるべきかが分からない。
     // 対象の単語帳は、本人が選んだもの → 無ければ直近に解いたもの。
-    const selected = await getSelectedBookId(db, r.friend_id);
-    const played = await db
-      .prepare(
-        `SELECT book_id FROM vocab_sessions WHERE friend_id = ?
-         ORDER BY finished_at DESC, id DESC LIMIT 1`,
-      )
-      .bind(r.friend_id)
-      .first<{ book_id: number }>();
-    const focusId = selected ?? played?.book_id ?? null;
+    const selected = bookId ? null : await getSelectedBookId(db, r.friend_id);
+    const played = bookId
+      ? null
+      : await db
+          .prepare(
+            `SELECT book_id FROM vocab_sessions WHERE friend_id = ?
+             ORDER BY finished_at DESC, id DESC LIMIT 1`,
+          )
+          .bind(r.friend_id)
+          .first<{ book_id: number }>();
+    const focusId = bookId ?? selected ?? played?.book_id ?? null;
 
     let bookName: string | null = null;
     let mastery: Mastery = { total: 0, mastered: 0, unmastered: 0, untried: 0, rate: 0 };

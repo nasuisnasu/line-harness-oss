@@ -198,7 +198,11 @@ vocab.get('/api/vocab/dashboard', async (c) => {
     const d = denied(gate.status);
     return c.json(d.body, d.status);
   }
-  const dashboard = await getVocabDashboard(c.env.DB, gate.friend.id, gate.friend.line_account_id);
+  // subject を渡すとその教科だけで数える。古文は別のテストなので合算しない。
+  const subject = c.req.query('subject') || null;
+  const dashboard = await getVocabDashboard(
+    c.env.DB, gate.friend.id, gate.friend.line_account_id, subject,
+  );
   return c.json({ success: true, ...dashboard });
 });
 
@@ -293,7 +297,9 @@ vocab.get('/api/vocab/admin/students', async (c) => {
   // 既定で受講生タグに絞る。単語テストを開けるのはタグ持ちだけなので、
   // 一覧に保護者やタグ無しの友だちが混ざると「未実施」の数が意味を失う。
   const tagId = c.req.query('tagId') || c.env.VOCAB_ALLOW_TAG_ID || null;
-  const students = await getVocabStudents(c.env.DB, lineAccountId, tagId);
+  // book_id を渡すとその単語帳だけで数える（古文単語テストの管理画面）
+  const bookId = Number(c.req.query('book_id')) || null;
+  const students = await getVocabStudents(c.env.DB, lineAccountId, tagId, bookId);
   return c.json({ success: true, students });
 });
 

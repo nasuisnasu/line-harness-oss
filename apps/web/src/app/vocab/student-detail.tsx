@@ -33,7 +33,8 @@ function fmtDateTime(iso: string): string {
 const kindLabel = (k: string) =>
   k === 'checkup' ? '実力' : k === 'review' ? '復習' : k === 'retry' ? 'もう一度' : 'セクション'
 const fmtLabel = (f: string) => (f === 'recall' ? '自己採点' : '4択')
-const dirLabel = (d: string) => (d === 'je' ? '日→英' : '英→日')
+const dirLabel = (d: string, subject = 'en') =>
+  subject === 'kobun' ? '古語→意味' : d === 'je' ? '日→英' : '英→日'
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`)
 
 /**
@@ -202,13 +203,19 @@ export default function VocabStudentDetailPanel({
   friendId,
   displayName,
   onBack,
+  fixedBookId,
+  subject = 'en',
 }: {
   friendId: string
   displayName: string | null
   onBack: () => void
+  /** 古文単語テストの画面から開いたときは、その1冊に固定して切り替えさせない */
+  fixedBookId?: number
+  /** 'en' | 'kobun'。出題の向きの呼び名に使う */
+  subject?: string
 }) {
   const [data, setData] = useState<VocabStudentDetail | null>(null)
-  const [bookId, setBookId] = useState<number | undefined>(undefined)
+  const [bookId, setBookId] = useState<number | undefined>(fixedBookId)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [openSession, setOpenSession] = useState<number | null>(null)
@@ -264,7 +271,7 @@ export default function VocabStudentDetailPanel({
       </button>
       <div className="mt-2 flex flex-wrap items-baseline gap-3">
         <h2 className="text-lg font-bold text-gray-900">{displayName || '(名前なし)'}</h2>
-        {data && data.books.length > 1 && (
+        {data && data.books.length > 1 && !fixedBookId && (
           <select
             value={focus?.id ?? ''}
             onChange={(e) => setBookId(Number(e.target.value))}
@@ -502,7 +509,7 @@ export default function VocabStudentDetailPanel({
                             {s.range_from !== null ? `${s.range_from}–${s.range_to}` : '—'}
                           </td>
                           <td className="py-2 pr-3">{fmtLabel(s.format)}</td>
-                          <td className="py-2 pr-3">{dirLabel(s.direction)}</td>
+                          <td className="py-2 pr-3">{dirLabel(s.direction, subject)}</td>
                           <td className="py-2 pr-3 tabular-nums">{s.timer_sec ? `${s.timer_sec}秒` : 'なし'}</td>
                           <td className="py-2 pr-3">{kindLabel(s.kind)}</td>
                           <td className="py-2 text-right font-semibold tabular-nums">
