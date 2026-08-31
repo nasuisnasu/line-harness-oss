@@ -49,6 +49,7 @@ import { lms } from './routes/lms.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
 import { materialSubmissions } from './routes/material-submissions.js';
 import { students } from './routes/students.js';
+import { scanTestLogs } from '@line-crm/db';
 
 export type Env = {
   Bindings: {
@@ -158,7 +159,40 @@ async function scheduled(
     checkAccountHealth(env.DB),
     // LINE OA の表示名/アイコンを24時間に1回 LINE API から同期
     syncLineAccountProfiles(env.DB),
+    // 生徒カルテ：テストログから症状の観測を拾う。**毎分は回さない**（1時間に1回）。
+    // 中身は決め打ちの対応表なので課金はかからないが、全生徒ぶんのクエリが毎分走る意味は無い
+    scanKarteHourly(env),
   ]);
+}
+
+/**
+ * 受講生タグ持ち全員のテストログを見て、症状の観測を積む。
+ * cron は毎分なので、JSTの毎時07分にだけ動かす（他の処理と分を分けて重ならないように）。
+ */
+async function scanKarteHourly(env: Env['Bindings']): Promise<void> {
+  const jst = new Date(Date.now() + 9 * 3600_000);
+  if (jst.getUTCMinutes() !== 7) return;
+
+  const lineAccountId = env.VOCAB_LINE_ACCOUNT_ID;
+  const tagId = env.VOCAB_ALLOW_TAG_ID;
+  if (!lineAccountId || !tagId) return;
+
+  const rows = await env.DB.prepare(
+    `SELECT f.id FROM friends f
+      WHERE f.line_account_id = ?
+        AND EXISTS (SELECT 1 FROM friend_tags ft WHERE ft.friend_id = f.id AND ft.tag_id = ?)`,
+  )
+    .bind(lineAccountId, tagId)
+    .all<{ id: string }>();
+
+  for (const f of rows.results || []) {
+    try {
+      // 直近3日ぶんだけ見る。毎時回るので、それより古いものは前の回で拾えている
+      await scanTestLogs(env.DB, f.id, 3);
+    } catch (err) {
+      console.error('[karte] scan failed', f.id, err);
+    }
+  }
 }
 
 export default {

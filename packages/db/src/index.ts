@@ -28,6 +28,7 @@ export * from './lms-goals';
 export * from './bas';
 export * from './bunkai';
 export * from './students';
+export * from './symptoms';
 
 /**
  * Thin wrapper around D1Database.
