@@ -48,6 +48,7 @@ import { bunkai } from './routes/bunkai.js';
 import { lms } from './routes/lms.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
 import { materialSubmissions } from './routes/material-submissions.js';
+import { students } from './routes/students.js';
 
 export type Env = {
   Bindings: {
@@ -136,6 +137,7 @@ app.route('/', bunkai);
 app.route('/', lms);
 app.route('/', eijakuMaterials);
 app.route('/', materialSubmissions);
+app.route('/', students);
 
 // 404 fallback
 app.notFound((c) => c.json({ success: false, error: 'Not found' }, 404));

@@ -27,6 +27,7 @@ export * from './grammar';
 export * from './lms-goals';
 export * from './bas';
 export * from './bunkai';
+export * from './students';
 
 /**
  * Thin wrapper around D1Database.

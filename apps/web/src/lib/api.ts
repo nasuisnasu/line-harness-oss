@@ -67,6 +67,36 @@ export type FriendListParams = {
 export type FriendWithTags = Friend & { tags: Tag[]; activeScenarios: { id: string; name: string }[] }
 
 export const api = {
+  /** 生徒カルテ。詳細（テスト・提出物・棚）は既存の画面が正本で、ここはサマリだけ */
+  students: {
+    list: (params?: { lineAccountId?: string; tagId?: string }) => {
+      const q = new URLSearchParams()
+      if (params?.lineAccountId) q.set('lineAccountId', params.lineAccountId)
+      if (params?.tagId) q.set('tagId', params.tagId)
+      return fetchApi<{ success: boolean; students: StudentRow[] }>('/api/students?' + q.toString())
+    },
+    get: (friendId: string) =>
+      fetchApi<{ success: boolean } & StudentOverview>('/api/students/' + friendId),
+    materials: (friendId: string) =>
+      fetchApi<{ success: boolean; linked: boolean; sets: ShelfSet[] }>(
+        '/api/students/' + friendId + '/materials'
+      ),
+    addNote: (friendId: string, body: string, pinned = false) =>
+      fetchApi<{ success: boolean; note: FriendNote }>('/api/students/' + friendId + '/notes', {
+        method: 'POST',
+        body: JSON.stringify({ body, pinned }),
+      }),
+    updateNote: (friendId: string, noteId: string, patch: { body?: string; pinned?: boolean }) =>
+      fetchApi<{ success: boolean; note: FriendNote }>(
+        '/api/students/' + friendId + '/notes/' + noteId,
+        { method: 'PATCH', body: JSON.stringify(patch) }
+      ),
+    deleteNote: (friendId: string, noteId: string) =>
+      fetchApi<{ success: boolean }>('/api/students/' + friendId + '/notes/' + noteId, {
+        method: 'DELETE',
+      }),
+  },
+
   friends: {
     list: (params?: FriendListParams) =>
       fetchApi<ApiResponse<PaginatedResponse<FriendWithTags>>>(
@@ -1736,4 +1766,97 @@ export interface BasSetSummary {
   count: number
   accepted_count: number
   extra_count: number
+}
+
+// ── 生徒カルテ ──────────────────────────────────────────────────────────────
+
+export interface StudentRow {
+  friend_id: string
+  display_name: string | null
+  picture_url: string | null
+  is_following: number
+  is_blocked: number
+  contracted: number
+  conducted: number
+  cancelled: number
+  /** 契約を1度も入れていない生徒は null（0回として扱わない） */
+  remaining: number | null
+  last_lesson_date: string | null
+  goal_label: string | null
+  goal_date: string | null
+  last_study_at: string | null
+  study_7d: number
+  pending_submissions: number
+  note_count: number
+  last_note_at: string | null
+  latest_note: string | null
+  latest_note_pinned: number
+}
+
+export interface StudentTestSummary {
+  kind: string
+  slug: string | null
+  name: string
+  subject: string | null
+  sessions: number
+  answers: number
+  correct: number
+  rate: number | null
+  last_at: string | null
+}
+
+export interface StudentSubmission {
+  id: string
+  status: string
+  source: string
+  note: string | null
+  file_count: number
+  result_note: string | null
+  created_at: string
+}
+
+export interface FriendNote {
+  id: string
+  friend_id: string
+  body: string
+  pinned: number
+  created_at: string
+  updated_at: string
+}
+
+export interface StudentOverview {
+  friend: {
+    id: string
+    line_user_id: string
+    line_account_id: string | null
+    display_name: string | null
+    picture_url: string | null
+    is_following: number
+    is_blocked: number
+    created_at: string
+  } | null
+  tags: { id: string; name: string; color: string | null }[]
+  goal: { label: string; target_date: string } | null
+  lessons: {
+    summary: {
+      contracted: number
+      conducted: number
+      cancelled: number
+      consumed: number
+      remaining: number | null
+    }
+    records: { id: string; type: string; count: number; record_date: string; note: string | null }[]
+  }
+  tests: StudentTestSummary[]
+  submissions: StudentSubmission[]
+  notes: FriendNote[]
+  last_message_at: string | null
+}
+
+/** 棚（eijaku-ai）が返す公開済みセット。形の正本は 元英弱ニキ/サイト/api の /shelf/for-line */
+export interface ShelfSet {
+  name: string
+  /** 公開した時刻（epoch ミリ秒）。0 のことがある */
+  releasedAt: number
+  files: { title: string; url: string; date: string }[]
 }
