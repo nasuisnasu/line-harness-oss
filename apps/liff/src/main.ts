@@ -23,6 +23,7 @@ import { initSchedule } from './schedule.js';
 import { initVocab } from './vocab.js';
 import { initGrammar, initCourseMenu } from './grammar.js';
 import { initBas } from './bas.js';
+import { initBunkai } from './bunkai.js';
 import { initMaterials } from './materials.js';
 import { initSubmitMaterial } from './submit-material.js';
 
@@ -432,6 +433,10 @@ async function main() {
     } else if (page === 'bas') {
       // 並び替えテスト（Build a Sentence）。セットは選ばせずプール全体から出す。
       await initBas();
+    } else if (page === 'bunkai') {
+      // 古文の品詞分解チェッカー。生徒が入れた文をその場で分解する。
+      // **このアプリで唯一、1回ごとに費用がかかるページ**（サーバーが Claude を叩く）。
+      await initBunkai();
     } else if (page === 'materials') {
       await initMaterials();
     } else if (page === 'submit') {

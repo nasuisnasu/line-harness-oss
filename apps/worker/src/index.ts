@@ -44,6 +44,7 @@ import { pay } from './routes/pay.js';
 import { vocab } from './routes/vocab.js';
 import { grammar } from './routes/grammar.js';
 import { bas } from './routes/bas.js';
+import { bunkai } from './routes/bunkai.js';
 import { lms } from './routes/lms.js';
 import { eijakuMaterials } from './routes/eijaku-materials.js';
 import { materialSubmissions } from './routes/material-submissions.js';
@@ -72,6 +73,12 @@ export type Env = {
     // 教材の取り込みを回す OA。**受講生専用だけ。**未設定なら VOCAB_LINE_ACCOUNT_ID を見る。
     // どちらも無いときは取り込まない（fail closed）
     STUDENT_LINE_ACCOUNT_ID?: string;
+    // 古文の品詞分解チェッカー。**このワーカーで唯一、従量課金のAPIを叩く機能。**
+    // 未設定なら /api/bunkai/parse だけが 503 を返す（他の機能には影響しない）
+    ANTHROPIC_API_KEY?: string;
+    BUNKAI_MODEL?: string;             // 既定は claude-opus-5。費用を絞りたいとき差し替える
+    BUNKAI_EFFORT?: string;            // low|medium|high|xhigh|max。既定 medium。費用の最大のつまみ
+    BUNKAI_DAILY_LIMIT?: string;       // 1人1日に叩ける回数。既定 20
     // 授業教材の受け取り。eijakuniki.com 側の棚（ワーカー eijaku-ai）を呼ぶ
     SHELF?: Fetcher;                   // 棚へのサービスバインディング（1042回避のためURLでは呼ばない）
     SHELF_PUBLIC_URL?: string;         // 生徒に見せるファイルの公開URL（例: https://eijaku-ai.<sub>.workers.dev）
@@ -125,6 +132,7 @@ app.route('/', pay);
 app.route('/', vocab);
 app.route('/', grammar);
 app.route('/', bas);
+app.route('/', bunkai);
 app.route('/', lms);
 app.route('/', eijakuMaterials);
 app.route('/', materialSubmissions);
