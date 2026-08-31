@@ -4,18 +4,16 @@
  * 1人の生徒について散らばっている情報を1画面ぶんにまとめて返す。
  * 中身の考え方は `packages/db/src/students.ts` のコメントが正本。
  *
- * ★ 入口が2つある。**中身の実装は1つ**（下の handle* 関数）。
+ * ★ 入口は `/api/eijaku/karte/*` の1本だけ。共有鍵（X-Shelf-Key）で守る。
  *
- *   1. `/api/students/*`        … API_KEY。insider-line-crm（Vercel）の管理画面から
- *   2. `/api/eijaku/karte/*`    … 共有鍵 X-Shelf-Key。eijakuniki.com/admin から
- *                                 （棚のワーカー eijaku-ai が中継する）
+ *     ブラウザ ──(adminPw)──▶ eijaku-ai ──(X-Shelf-Key)──▶ ここ
  *
- *   2 が要るのは、eijakuniki.com の管理画面が harness の API_KEY を持っていないから。
- *   あそこは adminPw で eijaku-ai を叩き、eijaku-ai が共有鍵でこちらに来る。
- *   `/api/eijaku/calendar` `/api/eijaku/students` と同じ経路に揃えてある。
+ *   画面は eijakuniki.com/admin/karte/。あそこは harness の API_KEY を持っていないので、
+ *   棚のワーカー（eijaku-ai）が中継する。`/api/eijaku/calendar` `/api/eijaku/students` と同じ経路。
+ *   API_KEY 用の入口（`/api/students/*`）も一度作ったが、使う画面を消したので外した。
  *
  * ★ `/api/eijaku/` は authMiddleware の素通しリストに入っている（生徒用の idToken 経路のため）。
- *   したがって **karte 側のハンドラは自分で共有鍵を確かめること**。
+ *   したがって **各ハンドラが自分で共有鍵を確かめること**。
  *   確かめ忘れると、鍵なしで全生徒のカルテとメモが読める。
  */
 
@@ -26,7 +24,6 @@ import {
   createFriendNote,
   updateFriendNote,
   deleteFriendNote,
-  getFriendNotes,
   addLessonRecord,
   deleteLessonRecord,
   isLessonType,
@@ -138,43 +135,7 @@ async function handleMaterials(c: Ctx, friendId: string) {
   return { status: 200 as const, payload: { success: true, linked: data.linked, sets } };
 }
 
-// ── 入口1：API_KEY（insider-line-crm） ──────────────────────────────────────
-
-students.get('/api/students', async (c) => c.json(await handleList(c)));
-
-students.get('/api/students/:friendId', async (c) => {
-  const overview = await getStudentOverview(c.env.DB, c.req.param('friendId'));
-  if (!overview.friend) return c.json({ success: false, error: '生徒が見つかりません' }, 404);
-  return c.json({ success: true, ...overview });
-});
-
-students.get('/api/students/:friendId/materials', async (c) => {
-  const r = await handleMaterials(c, c.req.param('friendId'));
-  return c.json(r.payload, r.status);
-});
-
-students.get('/api/students/:friendId/notes', async (c) =>
-  c.json({ success: true, notes: await getFriendNotes(c.env.DB, c.req.param('friendId')) }),
-);
-
-students.post('/api/students/:friendId/notes', async (c) => {
-  const body = await c.req.json<{ body?: string; pinned?: boolean }>().catch(() => ({}) as any);
-  const r = await handleNoteCreate(c, c.req.param('friendId'), body);
-  return c.json(r.payload, r.status);
-});
-
-students.patch('/api/students/:friendId/notes/:noteId', async (c) => {
-  const body = await c.req.json<{ body?: string; pinned?: boolean }>().catch(() => ({}) as any);
-  const r = await handleNoteUpdate(c, c.req.param('friendId'), c.req.param('noteId'), body);
-  return c.json(r.payload, r.status);
-});
-
-students.delete('/api/students/:friendId/notes/:noteId', async (c) => {
-  await deleteFriendNote(c.env.DB, c.req.param('friendId'), c.req.param('noteId'));
-  return c.json({ success: true });
-});
-
-// ── 入口2：共有鍵（eijakuniki.com/admin ← eijaku-ai が中継） ────────────────
+// ── 入口：共有鍵（eijakuniki.com/admin ← eijaku-ai が中継） ─────────────────
 //
 // **各ハンドラの先頭で必ず sharedKeyOk を通すこと。**
 // `/api/eijaku/` は authMiddleware が素通しするので、ここが唯一の壁。
