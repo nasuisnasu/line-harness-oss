@@ -11,6 +11,9 @@ import {
   enrollFriendInScenario,
   updateFriendBlocked,
   getLineAccountById,
+  addLessonRecord,
+  deleteLessonRecord,
+  isLessonType,
   jstNow,
 } from '@line-crm/db';
 import type { Friend as DbFriend, Tag as DbTag } from '@line-crm/db';
@@ -542,21 +545,17 @@ friends.post('/api/friends/:id/lessons', async (c) => {
   try {
     const friendId = c.req.param('id');
     const body = await c.req.json<{ type: string; count?: number; recordDate?: string; note?: string }>();
-    if (!body.type || !['contract', 'lesson', 'cancel'].includes(body.type)) {
+    if (!isLessonType(body.type)) {
       return c.json({ success: false, error: 'type must be contract | lesson | cancel' }, 400);
     }
-    // contract のみ count を採用。lesson / cancel は常に 1 消化。
-    const count = body.type === 'contract' ? Math.max(1, Math.round(body.count ?? 1)) : 1;
-    const recordDate = body.recordDate || jstNow().slice(0, 10);
-    const id = crypto.randomUUID();
-    const now = jstNow();
-    await c.env.DB
-      .prepare(
-        `INSERT INTO friend_lesson_records (id, friend_id, type, count, record_date, note, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(id, friendId, body.type, count, recordDate, body.note ?? null, now, now)
-      .run();
+    // 数え方（contract は count、lesson / cancel は常に1消化）は addLessonRecord が正本。
+    // 生徒カルテからも同じ経路で入るので、ここに書き写さない
+    const { id } = await addLessonRecord(c.env.DB, friendId, {
+      type: body.type,
+      count: body.count,
+      recordDate: body.recordDate,
+      note: body.note ?? null,
+    });
     return c.json({ success: true, data: { id } });
   } catch (err) {
     console.error('POST /api/friends/:id/lessons error:', err);
@@ -569,10 +568,7 @@ friends.delete('/api/friends/:id/lessons/:recordId', async (c) => {
   try {
     const friendId = c.req.param('id');
     const recordId = c.req.param('recordId');
-    await c.env.DB
-      .prepare('DELETE FROM friend_lesson_records WHERE id = ? AND friend_id = ?')
-      .bind(recordId, friendId)
-      .run();
+    await deleteLessonRecord(c.env.DB, friendId, recordId);
     return c.json({ success: true, data: null });
   } catch (err) {
     console.error('DELETE /api/friends/:id/lessons/:recordId error:', err);

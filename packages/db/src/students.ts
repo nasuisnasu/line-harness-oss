@@ -444,6 +444,51 @@ export async function getStudentOverview(
   };
 }
 
+// ── 授業記録 ────────────────────────────────────────────────────────────────
+//
+// 数え方は1か所に置く。契約は count をそのまま、実施とキャンセルは**必ず1回消化**。
+// キャンセルを0回にすると「休んだのに残回数が減らない」ことになり、
+// 契約回数と実際に押さえた枠がずれていく。
+
+export type LessonType = 'contract' | 'lesson' | 'cancel';
+
+export function isLessonType(v: unknown): v is LessonType {
+  return v === 'contract' || v === 'lesson' || v === 'cancel';
+}
+
+export async function addLessonRecord(
+  db: D1Database,
+  friendId: string,
+  input: { type: LessonType; count?: number; recordDate?: string; note?: string | null },
+): Promise<{ id: string }> {
+  // contract のみ count を採用。lesson / cancel は常に 1 消化
+  const count = input.type === 'contract' ? Math.max(1, Math.round(input.count ?? 1)) : 1;
+  const recordDate = /^\d{4}-\d{2}-\d{2}$/.test(String(input.recordDate ?? ''))
+    ? String(input.recordDate)
+    : jstNow().slice(0, 10);
+  const id = crypto.randomUUID();
+  const now = jstNow();
+  await db
+    .prepare(
+      `INSERT INTO friend_lesson_records (id, friend_id, type, count, record_date, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, friendId, input.type, count, recordDate, input.note ?? null, now, now)
+    .run();
+  return { id };
+}
+
+export async function deleteLessonRecord(
+  db: D1Database,
+  friendId: string,
+  recordId: string,
+): Promise<void> {
+  await db
+    .prepare('DELETE FROM friend_lesson_records WHERE id = ? AND friend_id = ?')
+    .bind(recordId, friendId)
+    .run();
+}
+
 // ── 講師メモ ────────────────────────────────────────────────────────────────
 
 /** 並びは pinned（いまの方針）を先頭に、あとは新しい順。 */
