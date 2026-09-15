@@ -23,7 +23,11 @@ interface MaterialFile {
   title: string;
   url: string;
   date: string;
+  /** 1 演習とワーク／2 赤入れで復習／3 音読／0 そのほか（棚の stepOf が決める） */
+  step?: number;
 }
+
+const STEP_NAMES: Record<number, string> = { 1: '1 演習とワーク', 2: '2 赤入れで復習', 3: '3 音読', 0: 'そのほか' };
 interface MaterialSet {
   name: string;
   releasedAt: number;
@@ -107,6 +111,8 @@ h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:6px 0 4px}
   letter-spacing:.06em;color:var(--fg3);border:1px solid var(--line2);
   padding:4px 8px;border-radius:6px;flex:none}
 .m-set .go{margin-left:auto;color:var(--fg3);font-size:17px;line-height:1;flex:none}
+.m-set .m-step{padding:7px 15px 5px;font-size:11.5px;font-weight:700;letter-spacing:.02em;color:var(--fg2);
+  background:var(--surface2);border-bottom:1px solid var(--line)}
 
 .m-empty{text-align:center;color:var(--fg2);font-size:14px;padding:56px 16px;line-height:2}
 .m-empty b{display:block;color:var(--fg);font-size:16px;font-weight:700;
@@ -190,20 +196,27 @@ export async function initMaterials(): Promise<void> {
   const total = data.sets.reduce((n, s) => n + s.files.length, 0);
   const sets = data.sets
     .map((s) => {
-      const files = s.files
-        .map(
-          (f) =>
-            `<li><a href="${esc(f.url)}" target="_blank" rel="noopener">` +
-            `<span class="k">${kindOf(f.title)}</span>` +
-            `<span class="nm">${esc(shortTitle(f.title, s.name))}</span>` +
-            `<span class="go">›</span></a></li>`,
-        )
-        .join('');
+      const li = (f: MaterialFile) =>
+        `<li><a href="${esc(f.url)}" target="_blank" rel="noopener">` +
+        `<span class="k">${kindOf(f.title)}</span>` +
+        `<span class="nm">${esc(shortTitle(f.title, s.name))}</span>` +
+        `<span class="go">›</span></a></li>`;
+      // 授業の流れ（ワーク → 赤入れで復習 → 音読）の段階ごとに分ける。
+      // 公開されている段階が1つだけのうちは、見出しを出さない
+      const groups = [1, 2, 3, 0]
+        .map((n) => [n, s.files.filter((f) => (f.step ?? 0) === n)] as const)
+        .filter(([, fs]) => fs.length);
+      const files =
+        groups.length < 2
+          ? `<ul>${s.files.map(li).join('')}</ul>`
+          : groups
+              .map(([n, fs]) => `<div class="m-step">${STEP_NAMES[n]}</div><ul>${fs.map(li).join('')}</ul>`)
+              .join('');
       const when = fmt(s.releasedAt);
       return (
         `<div class="m-set"><h3><span class="t">${esc(trimSetName(s.name))}</span>` +
         (when ? `<em>${when}</em>` : '') +
-        `</h3><ul>${files}</ul></div>`
+        `</h3>${files}</div>`
       );
     })
     .join('');
