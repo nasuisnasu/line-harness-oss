@@ -36,6 +36,7 @@ declare const liff: {
   getProfile(): Promise<{ userId: string; displayName: string; pictureUrl?: string }>;
   getIDToken(): string | null;
   isInClient(): boolean;
+  openWindow(opts: { url: string; external?: boolean }): void;
   closeWindow(): void;
 };
 
@@ -1764,8 +1765,12 @@ export async function initCourseMenu(): Promise<void> {
 <button class="v-go" id="cLesson">講義を見る<br><small>全18講・文法講座のトップへ</small></button>
 <button class="v-ghost" id="cTest">テストを始める<br><small>場所と形・1584問</small></button>`;
   app().innerHTML = shell('文法講座', '', body, '', null);
+  // LINEの中のブラウザでは window.print() が効かず、講座の「PDF保存」が押しても何も起きない。
+  // 講義はSafari/Chromeで開く。
   document.getElementById('cLesson')!.onclick = () => {
-    location.href = 'https://eijakuniki.com/grammar/';
+    const url = 'https://eijakuniki.com/grammar/';
+    if (liff.isInClient()) liff.openWindow({ url, external: true });
+    else location.href = url;
   };
   document.getElementById('cTest')!.onclick = () => {
     void initGrammar('grammar-course');
