@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 
 import Link from 'next/link'
 import type { Scenario, ScenarioStep, ScenarioTriggerType, MessageType } from '@line-crm/shared'
@@ -10,6 +10,7 @@ import GroupPicker from '@/components/group-picker'
 import MessageEditor from '@/components/message-editor'
 import { useAccount } from '@/lib/account-context'
 import { withGroup } from '@/lib/format-group'
+import ScenarioTalkPreview, { MessageBubble, TalkRow, type TalkPreviewStep } from '@/components/scenarios/scenario-talk-preview'
 
 type ScenarioWithSteps = Scenario & { steps: ScenarioStep[] }
 
@@ -45,6 +46,29 @@ function formatDelay(minutes: number): string {
   if (remaining === 0) return `${d}日後`
   const h = Math.floor(remaining / 60)
   return h > 0 ? `${d}日${h}時間後` : `${d}日${remaining}分後`
+}
+
+/**
+ * 配信タイミングの表示。ステップ一覧は delayMinutes だけを見ていたので、
+ * 'days_at_time' / 'absolute' で作ったステップが「即時」と表示されていた。
+ */
+function formatStepTiming(step: {
+  delayMode?: 'relative' | 'days_at_time' | 'absolute' | null
+  delayMinutes: number
+  delayDays?: number | null
+  delayTime?: string | null
+  delayAt?: string | null
+}): string {
+  const mode = step.delayMode ?? 'relative'
+  if (mode === 'days_at_time') {
+    const d = step.delayDays ?? 0
+    const t = step.delayTime ?? '10:00'
+    return d === 0 ? `当日 ${t}` : `${d}日後 ${t}`
+  }
+  if (mode === 'absolute') {
+    return step.delayAt ? `${step.delayAt.replace('T', ' ')} 配信` : '日時指定（未設定）'
+  }
+  return formatDelay(step.delayMinutes)
 }
 
 interface StepFormState {
@@ -166,6 +190,10 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
   // stepForm and we drop back into the normal editing surface.
   const [useTemplateMode, setUseTemplateMode] = useState(false)
   const [pickedTemplateId, setPickedTemplateId] = useState('')
+
+  // 全ステップをまとめたトークプレビュー。ステップを1件ずつ開かなくても
+  // シナリオ全体の流れを見たい、という運用側の要望で常時表示にしている。
+  const [showPreview, setShowPreview] = useState(true)
 
   const loadScenario = useCallback(async () => {
     setLoading(true)
@@ -398,6 +426,50 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
     }
   }
 
+  // 保存済みステップ + 編集中の未保存フォームを1本のトーク列にする。
+  // 編集中のステップはフォームの内容で差し替えるので、入力しながら
+  // 全体の見え方を確認できる。
+  const previewSteps: TalkPreviewStep[] = useMemo(() => {
+    if (!scenario) return []
+    const conditionLabel = (type: string | null, value: string | null) => {
+      if (!type) return null
+      const base = conditionTypeLabels[type] ?? type
+      if (!value) return base
+      return `${base}: ${tags.find((t) => t.id === value)?.name ?? value}`
+    }
+    const rows: TalkPreviewStep[] = scenario.steps.map((step) => ({
+      key: step.id,
+      stepOrder: step.stepOrder,
+      timing: formatStepTiming(step),
+      messageType: step.messageType,
+      messageContent: step.messageContent,
+      conditionLabel: conditionLabel(step.conditionType, step.conditionValue),
+      richMenuLabel: richMenus.find((r) => r.id === step.richMenuId)?.name ?? null,
+      templateName: step.templateId
+        ? (templates.find((t) => t.id === step.templateId)?.name ?? '（削除済みテンプレート）')
+        : null,
+    }))
+    if (showStepForm) {
+      const draft: TalkPreviewStep = {
+        key: editingStepId ?? '__draft__',
+        stepOrder: stepForm.stepOrder,
+        timing: formatStepTiming(stepForm),
+        messageType: stepForm.messageType,
+        messageContent: stepForm.messageContent,
+        conditionLabel: conditionLabel(stepForm.conditionType || null, stepForm.conditionValue || null),
+        richMenuLabel: richMenus.find((r) => r.id === stepForm.richMenuId)?.name ?? null,
+        templateName: stepForm.templateId
+          ? (templates.find((t) => t.id === stepForm.templateId)?.name ?? null)
+          : null,
+        highlight: true,
+      }
+      const idx = editingStepId ? rows.findIndex((r) => r.key === editingStepId) : -1
+      if (idx >= 0) rows[idx] = draft
+      else rows.push(draft)
+    }
+    return rows.sort((a, b) => a.stepOrder - b.stepOrder)
+  }, [scenario, tags, richMenus, templates, showStepForm, editingStepId, stepForm])
+
   if (loading) {
     return (
       <div>
@@ -589,8 +661,9 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
         )}
       </div>
 
-      {/* Steps */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      {/* Steps + 全体プレビュー */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+      <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h3 className="text-sm font-semibold text-gray-800">ステップ一覧</h3>
           <div className="flex items-center gap-2">
@@ -603,6 +676,12 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                 {testingId === '__all__' ? '送信中...' : '全ステップを一気にテスト送信'}
               </button>
             )}
+            <button
+              onClick={() => setShowPreview((v) => !v)}
+              className="px-3 py-1.5 min-h-[44px] text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg"
+            >
+              {showPreview ? '全体プレビューを隠す' : '全体プレビューを見る'}
+            </button>
             <button
               onClick={openAddStep}
               className="px-3 py-1.5 min-h-[44px] text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
@@ -908,7 +987,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                         >
                           {step.stepOrder}
                         </span>
-                        <span className="text-xs text-gray-500">{formatDelay(step.delayMinutes)}</span>
+                        <span className="text-xs text-gray-500">{formatStepTiming(step)}</span>
                         {step.templateId ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
                             🧩 テンプレート: {templates.find(t => t.id === step.templateId)?.name ?? '（削除済み）'}
@@ -974,99 +1053,30 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
           </div>
         )}
       </div>
+
+      {showPreview && (
+        <aside className="w-full lg:w-[360px] shrink-0 lg:sticky lg:top-6">
+          <ScenarioTalkPreview
+            steps={previewSteps}
+            accountName={selectedAccount?.name ?? '公式アカウント'}
+          />
+          <p className="text-[11px] text-gray-400 mt-2">
+            配信順に並べた全ステップです。条件付きステップは条件に合う友だちにだけ届きます。
+          </p>
+        </aside>
+      )}
+      </div>
     </div>
   )
 }
 
-/**
- * Renders a saved template the way LINE will deliver it. Each template type
- * has its own JSON shape, so plain text-bubble preview shows raw JSON for
- * image / flex / buttons templates — which is what the operator was seeing
- * before. We pivot per type to show something faithful instead.
- */
+/** 1件ぶんのプレビュー。トーク画面の1行として描く。 */
 function TemplatePreview({ tpl }: { tpl: { messageType: string; messageContent: string } }) {
-  const wrap = (children: ReactNode) => (
+  return (
     <div className="bg-[#7da9c0] rounded-lg p-3" aria-label="テンプレート プレビュー">
-      <div className="flex items-start gap-2">
-        <div className="w-8 h-8 rounded-full bg-white/40 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] text-white/90 mb-1">公式アカウント</p>
-          {children}
-        </div>
-      </div>
+      <TalkRow>
+        <MessageBubble messageType={tpl.messageType} messageContent={tpl.messageContent} />
+      </TalkRow>
     </div>
-  )
-
-  if (tpl.messageType === 'text') {
-    return wrap(
-      <div
-        className="bg-white rounded-2xl px-3 py-2 text-[13px] text-gray-900 whitespace-pre-wrap break-words leading-relaxed"
-        style={{ maxWidth: '320px' }}
-      >
-        {tpl.messageContent || <span className="text-gray-400">(空)</span>}
-      </div>,
-    )
-  }
-
-  if (tpl.messageType === 'image') {
-    let url: string | null = null
-    try {
-      const parsed = JSON.parse(tpl.messageContent) as { previewImageUrl?: string; originalContentUrl?: string }
-      url = parsed.previewImageUrl ?? parsed.originalContentUrl ?? null
-    } catch { /* fall through to raw */ }
-    return wrap(
-      url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt="" className="rounded-2xl block" style={{ maxWidth: '240px' }} />
-      ) : (
-        <div className="bg-white rounded-2xl px-3 py-2 text-[12px] text-red-500" style={{ maxWidth: '320px' }}>
-          画像URLが解析できません
-        </div>
-      ),
-    )
-  }
-
-  if (tpl.messageType === 'buttons') {
-    let parsed: {
-      thumbnailImageUrl?: string
-      title?: string
-      text?: string
-      actions?: Array<{ label?: string }>
-    } | null = null
-    try { parsed = JSON.parse(tpl.messageContent) } catch { /* ignore */ }
-    if (!parsed) {
-      return wrap(
-        <div className="bg-white rounded-2xl px-3 py-2 text-[12px] text-red-500" style={{ maxWidth: '320px' }}>
-          ボタンテンプレートが解析できません
-        </div>,
-      )
-    }
-    return wrap(
-      <div className="bg-white rounded-2xl overflow-hidden text-[13px] text-gray-900" style={{ maxWidth: '320px' }}>
-        {parsed.thumbnailImageUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={parsed.thumbnailImageUrl} alt="" className="w-full block" style={{ aspectRatio: '1.51 / 1', objectFit: 'cover' }} />
-        )}
-        <div className="px-3 py-2">
-          {parsed.title && <p className="font-bold mb-1 break-words">{parsed.title}</p>}
-          <p className="whitespace-pre-wrap break-words leading-relaxed">{parsed.text}</p>
-        </div>
-        <div className="border-t border-gray-100">
-          {(parsed.actions ?? []).map((a, i) => (
-            <div key={i} className="px-3 py-2 text-center text-[#06C755] border-b border-gray-100 last:border-0">
-              {a.label || `ボタン ${i + 1}`}
-            </div>
-          ))}
-        </div>
-      </div>,
-    )
-  }
-
-  // flex / unknown — fall back to a code panel since arbitrary flex JSON
-  // can't be reliably rendered without the LINE SDK runtime.
-  return wrap(
-    <div className="bg-white rounded-2xl px-3 py-2 text-[11px] text-gray-700 font-mono whitespace-pre-wrap break-all" style={{ maxWidth: '320px' }}>
-      {tpl.messageContent.length > 400 ? tpl.messageContent.slice(0, 400) + '…' : tpl.messageContent}
-    </div>,
   )
 }
